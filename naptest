@@ -36,35 +36,39 @@ class naptest:
             database = args.output+"/"+"scan.sqlite"
     
             #Get and parse the XML
-            tree = ET.ElementTree(file = xmlfile) 
-            root = tree.getroot()
-    
-            #Create the table in the database
-            cur = con.cursor()
             try:
-                cur.execute("CREATE TABLE "+dbtable+" (hostname varchar(100), ip varchar(16), port integer(5), protocol varchar(3), state varchar(20), service varchar(100), tunnel varchar(4), version varchar(100));")
+                tree = ET.ElementTree(file = xmlfile) 
+                root = tree.getroot()
+
+        
+                #Create the table in the database
+                cur = con.cursor()
+                try:
+                    cur.execute("CREATE TABLE "+dbtable+" (hostname varchar(100), ip varchar(16), port integer(5), protocol varchar(3), state varchar(20), service varchar(100), tunnel varchar(4), version varchar(100));")
+                except:
+                    pass
+        
+                #loop through and pull out the data for the db
+                for host in root.iterfind('host'):
+                    hostname = None
+                    ip = host.find("./address").attrib['addr']
+                    for openport in host.iter('port'):
+                        port = openport.attrib['portid']
+                        protocol = openport.attrib['protocol']
+                        state = openport.find("./state").attrib['state']
+                        try: service = openport.find("./service").attrib['name']
+                        except: service = "empty"
+                        try: tunnel = openport.find("./service").attrib['tunnel']
+                        except: tunnel="none"
+                        try: product = openport.find("./service").attrib['product'] 
+                        except: product=""
+                        try: productversion = openport.find("./service").attrib['version']
+                        except: productversion=""
+                        cur.execute("INSERT INTO "+dbtable+"(hostname,ip,port,protocol,state,service,tunnel,version) values (?,?,?,?,?,?,?,?)",(hostname,ip,port,protocol,state,service,tunnel,product+' '+productversion)) 
+                
+                con.commit()
             except:
                 pass
-    
-            #loop through and pull out the data for the db
-            for host in root.iterfind('host'):
-                hostname = None
-                ip = host.find("./address").attrib['addr']
-                for openport in host.iter('port'):
-                    port = openport.attrib['portid']
-                    protocol = openport.attrib['protocol']
-                    state = openport.find("./state").attrib['state']
-                    try: service = openport.find("./service").attrib['name']
-                    except: service = "empty"
-                    try: tunnel = openport.find("./service").attrib['tunnel']
-                    except: tunnel="none"
-                    try: product = openport.find("./service").attrib['product'] 
-                    except: product=""
-                    try: productversion = openport.find("./service").attrib['version']
-                    except: productversion=""
-                    cur.execute("INSERT INTO "+dbtable+"(hostname,ip,port,protocol,state,service,tunnel,version) values (?,?,?,?,?,?,?,?)",(hostname,ip,port,protocol,state,service,tunnel,product+' '+productversion)) 
-            
-            con.commit()
         
         #Work out if the input is a single file or a folder 
         if os.path.isfile(args.xml):
