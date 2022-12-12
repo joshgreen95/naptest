@@ -45,9 +45,10 @@ class naptest:
                 cur = con.cursor()
                 try:
                     cur.execute("CREATE TABLE "+dbtable+" (hostname varchar(100), ip varchar(16), port integer(5), protocol varchar(3), state varchar(20), service varchar(100), tunnel varchar(4), version varchar(100));")
+                    cur.execute("CREATE UNIQUE INDEX duplicatecheck ON "+dbtable+" (ip,port,protocol);")
                 except:
                     pass
-        
+
                 #loop through and pull out the data for the db
                 for host in root.iterfind('host'):
                     hostname = None
@@ -64,6 +65,8 @@ class naptest:
                         except: product=""
                         try: productversion = openport.find("./service").attrib['version']
                         except: productversion=""
+                        
+                        #enter into db
                         cur.execute("INSERT INTO "+dbtable+"(hostname,ip,port,protocol,state,service,tunnel,version) values (?,?,?,?,?,?,?,?)",(hostname,ip,port,protocol,state,service,tunnel,product+' '+productversion)) 
                 
                 con.commit()
