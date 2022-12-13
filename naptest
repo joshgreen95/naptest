@@ -1,7 +1,7 @@
 #!/bin/python3
 # NAPTEST   # Not another pentest!?
 # Take a nap.
-import sys,sqlite3,os,argparse
+import sys,sqlite3,os,argparse,ast
 table='scandata'
 testettelocation="/home/mike/tmp/naptest/testette/"
 
@@ -51,7 +51,9 @@ class naptest:
 
                 #loop through and pull out the data for the db
                 for host in root.iterfind('host'):
-                    hostname = None
+                    hostname = []
+                    for name in host.find("./hostnames"):
+                        hostname.append(name.attrib['name'])
                     ip = host.find("./address").attrib['addr']
                     for openport in host.iter('port'):
                         port = openport.attrib['portid']
@@ -67,7 +69,8 @@ class naptest:
                         except: productversion=""
                         
                         #enter into db
-                        cur.execute("INSERT INTO "+dbtable+"(hostname,ip,port,protocol,state,service,tunnel,version) values (?,?,?,?,?,?,?,?)",(hostname,ip,port,protocol,state,service,tunnel,product+' '+productversion)) 
+                        if state != "open|filtered":
+                            cur.execute("INSERT INTO "+dbtable+"(hostname,ip,port,protocol,state,service,tunnel,version) values (?,?,?,?,?,?,?,?)",(str(hostname),ip,port,protocol,state,service,tunnel,product+' '+productversion)) 
                 
                 con.commit()
             except:
@@ -92,7 +95,7 @@ class naptest:
         print("[+] Enumerating services") 
         con=sqlite3.connect(database)
         cur = con.cursor()
-        cur.execute('SELECT distinct service,protocol FROM '+table+';')
+        cur.execute('SELECT distinct service,protocol FROM '+table+' where state="open";')
         servicelist = cur.fetchall()
         for service,protocol in servicelist:
             cur.execute('SELECT ip ||":"|| port FROM '+table+' WHERE service="'+service+'"and state="open" and protocol="'+protocol+'";')
@@ -132,12 +135,19 @@ class naptest:
             print("[+] HTTP identification")
             tunnel='none'
             service='plainhttp'
-        cur.execute('SELECT ip ||":"|| port FROM '+table+' WHERE service like "%http%" and tunnel="'+tunnel+'" and state="open" and protocol="tcp";')
+        cur.execute('SELECT hostname ||":"|| ip ||":"|| port FROM '+table+' WHERE service like "%http%" and tunnel="'+tunnel+'" and state="open" and protocol="tcp";')
         result=cur.fetchall()
         nowlist=[]
         if result:
             for line in result:
-                nowlist.extend(line)
+                string = line[0]
+                list  = string.split(":")
+                hostname = ast.literal_eval(list[0])
+                ip  = list[1]
+                port  = list[2]
+                nowlist.append(ip+":"+port)
+                for name in hostname:
+                    nowlist.append(name+":"+port)
             servicearray[service]={"tcp": nowlist}
             print("   [*] Found "+str(len(nowlist))+" "+service+" ports")
     

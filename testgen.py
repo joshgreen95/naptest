@@ -11,21 +11,19 @@ cmdqueue=[]
 
 def parsefile(infile):
 	with open(infile) as f:
-	    return ast.literal_eval(f.read())
+		response = ast.literal_eval(f.read())
+		return response
 
 servicearray = parsefile(servicearrayfile)
 
 for service in servicearray:
-	print(service)
 	tests=""
-		
-	try:
-		tests=parsefile(modulepath+service)
-		print(("[+] Found tests for "+service))
-	
-	
-	except:
-		pass
+	if os.path.exists(modulepath+service):	
+		try:
+			tests=parsefile(modulepath+service)
+			print(("[+] Found tests for "+service))
+		except Exception as e:
+			print("[!] Error processing "+service+" module: "+str(e))
 
 	for test in tests:
 		print(("   [*] Adding "+test+" to the queue"))

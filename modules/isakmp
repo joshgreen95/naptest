@@ -2,6 +2,7 @@
 
 {
 
-"ike-scan": [ "ip", "ike-scan", "ike-scan -M IP > DIR/IP.out", "udp"]
+"ike-scan-main": [ "ip", "ike-scan", "ike-scan -M IP > DIR/IP.main.out", "udp"],
+"ike-scan-aggressive": [ "ip", "ike-scan", "ike-scan -A IP > DIR/IP.aggessive.out", "udp"]
 
 }
