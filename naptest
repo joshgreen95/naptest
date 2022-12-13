@@ -122,6 +122,19 @@ class naptest:
                 nowlist.extend(line)
             servicearray['sslport']={"tcp": nowlist}
             print("   [*] Found "+str(len(ssllist))+" SSL ports")
+
+    def findclosed(self):
+        print("[+] Closed port identification")
+        con=sqlite3.connect(database)
+        cur = con.cursor()
+        cur.execute('select ip||":"||port||":"||protocol from '+table+' where state="closed";')
+        closedlist = cur.fetchall()
+        if closedlist:
+            nowlist=[]
+            for line in closedlist:
+                nowlist.extend(line)
+            servicearray['closed']={"": nowlist}
+            print("   [*] Found "+str(len(closedlist))+" closed ports")
                 
     # Identifies HTTP and HTTPS 
     def findhttp(self,SSL):
@@ -223,6 +236,7 @@ def main():
     n.findssl()
     n.findhttp('1')
     n.findhttp('0')
+    n.findclosed()
     if args.level == "test":
         n.loadmodules()
     elif args.level == "generate":
