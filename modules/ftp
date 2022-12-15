@@ -1,0 +1,8 @@
+#Dictionary, where key is the tool name, then a list in the following order: type of command (ip, multiple), output folder, command string (DIR=output folder, HOST=ip:port, IP=ip, PORT=port, protocol
+
+{
+
+"ftpmap": [ "ip", "ftpmap", "ftpmap -S -s IP > DIR/HOST.out", "tcp"],
+"ftpbanner-nmap": [ "ip", "ftpbanner-nmap", "nmap -p PORT --script=banner IP -oN DIR/HOST.nmap", "tcp"]
+
+}
