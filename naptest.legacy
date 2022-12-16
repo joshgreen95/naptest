@@ -2,6 +2,8 @@
 # NAPTEST   # Not another pentest!?
 # Take a nap.
 import sys,sqlite3,os,argparse,ast
+table='scandata'
+testettelocation="/home/mike/tmp/naptest/testette/"
 
 class naptest:
     
@@ -25,12 +27,13 @@ class naptest:
         import os
 
         def processxml(xmlfile):
-            db = os.path.join(args.output, "naptest.db")
+            db = os.path.join(args.output, "scan.sqlite")
             if os.path.isfile(db):
                 pass
+            dbtable = "scandata"
             con = lite.connect(db)
             global database
-            database = args.output+"/"+"naptest.db"
+            database = args.output+"/"+"scan.sqlite"
     
             #Get and parse the XML
             try:
@@ -40,13 +43,9 @@ class naptest:
         
                 #Create the table in the database
                 cur = con.cursor()
-                cur.row_factory = lambda cursor, row: row[0]
                 try:
-                    cur.execute("CREATE TABLE openports (ip varchar(16), port integer(5), protocol varchar(3), service varchar(100), tunnel varchar(4), version varchar(100));")
-                    cur.execute("CREATE TABLE closedports (ip varchar(16), port integer(5), range varchar(100), protocol varchar(3));")
-                    cur.execute("CREATE TABLE hostnames (hostnamelist varchar(500), ip varchar(16));")
-                    cur.execute("CREATE UNIQUE INDEX opencheck ON openports (ip,port,protocol);")
-                    cur.execute("CREATE UNIQUE INDEX closedcheck ON closedports (ip,port,range,protocol);")
+                    cur.execute("CREATE TABLE "+dbtable+" (hostname varchar(100), ip varchar(16), port integer(5), protocol varchar(3), state varchar(20), service varchar(100), tunnel varchar(4), version varchar(100));")
+                    cur.execute("CREATE UNIQUE INDEX duplicatecheck ON "+dbtable+" (ip,port,protocol);")
                 except:
                     pass
 
@@ -56,18 +55,6 @@ class naptest:
                     for name in host.find("./hostnames"):
                         hostname.append(name.attrib['name'])
                     ip = host.find("./address").attrib['addr']
-
-                    for extraport in host.findall("./ports/extraports"):
-                        if extraport.attrib['state'] == "closed":
-                            closed_protocol=extraport.find("./extrareasons").attrib['proto']
-                            closed_ports=extraport.find("./extrareasons").attrib['ports']
-                            try:
-                                cur.execute("INSERT INTO closedports (ip,protocol,range) values (?,?,?)",(ip,closed_protocol,closed_ports)) 
-                            except Exception as e:
-                                print(e)
-
-
-
                     for openport in host.iter('port'):
                         port = openport.attrib['portid']
                         protocol = openport.attrib['protocol']
@@ -80,30 +67,10 @@ class naptest:
                         except: product=""
                         try: productversion = openport.find("./service").attrib['version']
                         except: productversion=""
-
-                        #handle hostnames
-                        try:
-                            if hostname:
-                                existing_hostnames = cur.execute("SELECT hostnamelist from hostnames where ip='"+ip+"';").fetchall()
-                                if not existing_hostnames:
-                                    cur.execute("INSERT INTO hostnames (hostnamelist,ip) VALUES (?,?)",(str(hostname),ip))
-                                elif existing_hostnames:
-                                    pleasework = ast.literal_eval(str(existing_hostnames[0]))
-                                    set1 = set(hostname)
-                                    set2 = set(pleasework)
-                                    all_hostnames = list(set1.union(set2))
-                                    cur.execute("UPDATE hostnames SET hostnamelist=? WHERE ip=?;",(str(all_hostnames),ip))
-                        except Exception as e:
-                            print(e)
- 
+                        
                         #enter into db
-                        dbtable=""
-                        if state == "open":
-                            dbtable = "openports"
-                            cur.execute("INSERT INTO "+dbtable+" (ip,port,protocol,service,tunnel,version) values (?,?,?,?,?,?)",(ip,port,protocol,service,tunnel,product+' '+productversion)) 
-                        elif state == "closed":
-                            dbtable = "closedports"
-                            cur.execute("INSERT INTO "+dbtable+" (ip,port,protocol) values (?,?,?)",(ip,port,protocol)) 
+                        if state != "open|filtered":
+                            cur.execute("INSERT INTO "+dbtable+"(hostname,ip,port,protocol,state,service,tunnel,version) values (?,?,?,?,?,?,?,?)",(str(hostname),ip,port,protocol,state,service,tunnel,product+' '+productversion)) 
                 
                 con.commit()
             except:
@@ -128,10 +95,10 @@ class naptest:
         print("[+] Enumerating services") 
         con=sqlite3.connect(database)
         cur = con.cursor()
-        cur.execute('SELECT distinct service,protocol FROM openports;')
+        cur.execute('SELECT distinct service,protocol FROM '+table+' where state="open";')
         servicelist = cur.fetchall()
         for service,protocol in servicelist:
-            cur.execute('SELECT ip ||":"|| port FROM openports WHERE service="'+service+'"and protocol="'+protocol+'";')
+            cur.execute('SELECT ip ||":"|| port FROM '+table+' WHERE service="'+service+'"and state="open" and protocol="'+protocol+'";')
             hostports=cur.fetchall()
             nowlist=[]
             if service not in servicearray:
@@ -141,57 +108,47 @@ class naptest:
             servicearray[service][protocol]=nowlist
         print("   [*] Found "+str(len(servicearray))+" distinct services")
         # if servicelist is longer than servicearray- there are closed ports
-
-    #Gets hostnames from an IP
-    def gethostnames(self,ip):
-        con=sqlite3.connect(database)
-        cur = con.cursor()
-        hostnamelist = ast.literal_eval(cur.execute("select hostnamelist from hostnames where ip='"+ip+"';").fetchall()[0][0])
-        return(hostnamelist)
-
     
     # Finds any port with SSL listening     
     def findssl(self):
         print("[+] SSL port identification")
         con=sqlite3.connect(database)
         cur = con.cursor()
-        con.row_factory = sqlite3.Row
-        cur.execute('select ip,port from openports where tunnel="ssl" and protocol="tcp";')
-        ssllist = cur.fetchall()
-        if ssllist:
-            nowlist=[]
-            for line in ssllist:
-                ip = line[0]
-                port = line[1]
-                nowlist.append(ip+":"+str(port))
-                hnlist = self.gethostnames(ip)
-                for hn in list(hnlist):
-                    nowlist.append(hn+":"+str(port))
+        cur.execute('SELECT hostname ||":"|| ip ||":"|| port FROM '+table+' WHERE tunnel="ssl" and state="open" and protocol="tcp";')
+        result=cur.fetchall()
+        nowlist=[]
+        if result:
+            for line in result:
+                string = line[0]
+                list  = string.split(":")
+                hostname = ast.literal_eval(list[0])
+                ip  = list[1]
+                port  = list[2]
+                nowlist.append(ip+":"+port)
+                for name in hostname:
+                    nowlist.append(name+":"+port)
             servicearray['sslport']={"tcp": nowlist}
-            print("   [*] Found "+str(len(ssllist))+" SSL ports")
+        #cur.execute('select ip||":"||port from '+table+' where tunnel="ssl" and state="open" and protocol="tcp";')
+        #ssllist = cur.fetchall()
+        #if ssllist:
+        #    nowlist=[]
+        #    for line in ssllist:
+        #        nowlist.extend(line)
+        #    servicearray['sslport']={"tcp": nowlist}
+            print("   [*] Found "+str(len(nowlist))+" SSL ports")
 
     def findclosed(self):
         print("[+] Closed port identification")
         con=sqlite3.connect(database)
         cur = con.cursor()
-        con.row_factory = sqlite3.Row
-        #cur.execute('select ip||":"||port||":"||protocol from closedports;')
-        cur.execute('select * from closedports;')
+        cur.execute('select ip||":"||port||":"||protocol from '+table+' where state="closed";')
         closedlist = cur.fetchall()
         if closedlist:
             nowlist=[]
             for line in closedlist:
-                cip = line[0]
-                cport = line[1]
-                crange = line[2]
-                cprotocol = line[3]
-                if cport is None:
-                    string = cip+":"+crange+":"+cprotocol
-                if crange is None:
-                    string = cip+":"+str(cport)+":"+cprotocol
-                nowlist.append(string)
+                nowlist.extend(line)
             servicearray['closed']={"": nowlist}
-            print("   [*] Found "+str(len(closedlist))+" closed ports/ranges")
+            print("   [*] Found "+str(len(closedlist))+" closed ports")
                 
     # Identifies HTTP and HTTPS 
     def findhttp(self,SSL):
@@ -205,17 +162,19 @@ class naptest:
             print("[+] HTTP identification")
             tunnel='none'
             service='plainhttp'
-        cur.execute('SELECT ip,port FROM openports WHERE service like "%http%" and tunnel="'+tunnel+'" and protocol="tcp";')
+        cur.execute('SELECT hostname ||":"|| ip ||":"|| port FROM '+table+' WHERE service like "%http%" and tunnel="'+tunnel+'" and state="open" and protocol="tcp";')
         result=cur.fetchall()
         nowlist=[]
         if result:
             for line in result:
-                ip = line[0]
-                port = line[1]
-                nowlist.append(ip+":"+str(port))
-                hnlist = self.gethostnames(ip)
-                for hn in list(hnlist):
-                    nowlist.append(hn+":"+str(port))
+                string = line[0]
+                list  = string.split(":")
+                hostname = ast.literal_eval(list[0])
+                ip  = list[1]
+                port  = list[2]
+                nowlist.append(ip+":"+port)
+                for name in hostname:
+                    nowlist.append(name+":"+port)
             servicearray[service]={"tcp": nowlist}
             print("   [*] Found "+str(len(nowlist))+" "+service+" ports")
     
@@ -250,7 +209,7 @@ class naptest:
                 
                     sfile = open (os.path.join(protocoldir, filename), 'w')
                     for line in hostports:
-                        sfile.write(prefix+str(line)+"\n")
+                        sfile.write(prefix+line+"\n")
                     sfile.close
         
     
