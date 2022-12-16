@@ -36,78 +36,100 @@ class naptest:
             try:
                 tree = ET.ElementTree(file = xmlfile) 
                 root = tree.getroot()
-
-        
-                #Create the table in the database
-                cur = con.cursor()
-                cur.row_factory = lambda cursor, row: row[0]
-                try:
-                    cur.execute("CREATE TABLE openports (ip varchar(16), port integer(5), protocol varchar(3), service varchar(100), tunnel varchar(4), version varchar(100));")
-                    cur.execute("CREATE TABLE closedports (ip varchar(16), port integer(5), range varchar(100), protocol varchar(3));")
-                    cur.execute("CREATE TABLE hostnames (hostnamelist varchar(500), ip varchar(16));")
-                    cur.execute("CREATE UNIQUE INDEX opencheck ON openports (ip,port,protocol);")
-                    cur.execute("CREATE UNIQUE INDEX closedcheck ON closedports (ip,port,range,protocol);")
-                except:
-                    pass
-
-                #loop through and pull out the data for the db
-                for host in root.iterfind('host'):
-                    hostname = []
-                    for name in host.find("./hostnames"):
-                        hostname.append(name.attrib['name'])
-                    ip = host.find("./address").attrib['addr']
-
-                    for extraport in host.findall("./ports/extraports"):
-                        if extraport.attrib['state'] == "closed":
-                            closed_protocol=extraport.find("./extrareasons").attrib['proto']
-                            closed_ports=extraport.find("./extrareasons").attrib['ports']
-                            try:
-                                cur.execute("INSERT INTO closedports (ip,protocol,range) values (?,?,?)",(ip,closed_protocol,closed_ports)) 
-                            except Exception as e:
-                                print(e)
-
-
-
-                    for openport in host.iter('port'):
-                        port = openport.attrib['portid']
-                        protocol = openport.attrib['protocol']
-                        state = openport.find("./state").attrib['state']
-                        try: service = openport.find("./service").attrib['name']
-                        except: service = "empty"
-                        try: tunnel = openport.find("./service").attrib['tunnel']
-                        except: tunnel="none"
-                        try: product = openport.find("./service").attrib['product'] 
-                        except: product=""
-                        try: productversion = openport.find("./service").attrib['version']
-                        except: productversion=""
-
-                        #handle hostnames
-                        try:
-                            if hostname:
-                                existing_hostnames = cur.execute("SELECT hostnamelist from hostnames where ip='"+ip+"';").fetchall()
-                                if not existing_hostnames:
-                                    cur.execute("INSERT INTO hostnames (hostnamelist,ip) VALUES (?,?)",(str(hostname),ip))
-                                elif existing_hostnames:
-                                    pleasework = ast.literal_eval(str(existing_hostnames[0]))
-                                    set1 = set(hostname)
-                                    set2 = set(pleasework)
-                                    all_hostnames = list(set1.union(set2))
-                                    cur.execute("UPDATE hostnames SET hostnamelist=? WHERE ip=?;",(str(all_hostnames),ip))
-                        except Exception as e:
-                            print(e)
- 
-                        #enter into db
-                        dbtable=""
-                        if state == "open":
-                            dbtable = "openports"
-                            cur.execute("INSERT INTO "+dbtable+" (ip,port,protocol,service,tunnel,version) values (?,?,?,?,?,?)",(ip,port,protocol,service,tunnel,product+' '+productversion)) 
-                        elif state == "closed":
-                            dbtable = "closedports"
-                            cur.execute("INSERT INTO "+dbtable+" (ip,port,protocol) values (?,?,?)",(ip,port,protocol)) 
-                
-                con.commit()
             except:
+                print("[!] Error parsing XML from :"+xmlfile)
+                return
+
+    
+            #Create the table in the database
+            cur = con.cursor()
+            cur.row_factory = lambda cursor, row: row[0]
+            try:
+                cur.execute("CREATE TABLE openports (ip varchar(16), port integer(5), protocol varchar(3), service varchar(100), tunnel varchar(4), version varchar(100));")
+                cur.execute("CREATE TABLE closedports (ip varchar(16), port integer(5), range varchar(100), protocol varchar(3));")
+                cur.execute("CREATE TABLE hostnames (hostnamelist varchar(500), ip varchar(16));")
+                cur.execute("CREATE TABLE scripts (id varchar(100), ip varchar(16), port integer(5), output varchar(512));")
+                cur.execute("CREATE UNIQUE INDEX opencheck ON openports (ip,port,protocol);")
+                cur.execute("CREATE UNIQUE INDEX closedcheckip ON closedports (ip,port,protocol);")
+                cur.execute("CREATE UNIQUE INDEX closedcheckrange ON closedports (ip,range,protocol);")
+                cur.execute("CREATE UNIQUE INDEX scriptcheck ON scripts (id,ip,port);")
+            except Exception as e:
                 pass
+
+            #loop through and pull out the data for the db
+            for host in root.iterfind('host'):
+                hostname = []
+                for name in host.find("./hostnames"):
+                    hostname.append(name.attrib['name'])
+                ip = host.find("./address").attrib['addr']
+
+                for extraport in host.findall("./ports/extraports"):
+                    if extraport.attrib['state'] == "closed":
+                        closed_protocol=extraport.find("./extrareasons").attrib['proto']
+                        closed_ports=extraport.find("./extrareasons").attrib['ports']
+                        try:
+                            cur.execute("INSERT INTO closedports (ip,protocol,range) values (?,?,?)",(ip,closed_protocol,closed_ports)) 
+                        except Exception as e:
+                            pass
+
+
+
+                for openport in host.iter('port'):
+                    port = openport.attrib['portid']
+                    protocol = openport.attrib['protocol']
+                    state = openport.find("./state").attrib['state']
+                    try: service = openport.find("./service").attrib['name']
+                    except: service = "empty"
+                    try: tunnel = openport.find("./service").attrib['tunnel']
+                    except: tunnel="none"
+                    try: product = openport.find("./service").attrib['product'] 
+                    except: product=""
+                    try: productversion = openport.find("./service").attrib['version']
+                    except: productversion=""
+
+                    #handle scripts
+                    try:
+                        for script in openport.findall('script'):
+                            sid = script.attrib['id']
+                            soutput = script.attrib['output']
+                            try:
+                                cur.execute("INSERT INTO scripts (id,ip,port,output) VALUES (?,?,?,?)",(sid,ip,port,soutput))
+                            except Exception as e:
+                                pass
+                    except:
+                        pass
+
+                    #handle hostnames
+                    try:
+                        if hostname:
+                            existing_hostnames = cur.execute("SELECT hostnamelist from hostnames where ip='"+ip+"';").fetchall()
+                            if not existing_hostnames:
+                                cur.execute("INSERT INTO hostnames (hostnamelist,ip) VALUES (?,?)",(str(hostname),ip))
+                            elif existing_hostnames:
+                                pleasework = ast.literal_eval(str(existing_hostnames[0]))
+                                set1 = set(hostname)
+                                set2 = set(pleasework)
+                                all_hostnames = list(set1.union(set2))
+                                cur.execute("UPDATE hostnames SET hostnamelist=? WHERE ip=?;",(str(all_hostnames),ip))
+                    except Exception as e:
+                        print(e)
+
+                    #enter into db
+                    dbtable=""
+                    if state == "open":
+                        dbtable = "openports"
+                        try:
+                            cur.execute("INSERT INTO "+dbtable+" (ip,port,protocol,service,tunnel,version) values (?,?,?,?,?,?)",(ip,port,protocol,service,tunnel,product+' '+productversion)) 
+                        except:
+                            pass
+                    elif state == "closed":
+                        dbtable = "closedports"
+                        try:
+                            cur.execute("INSERT INTO "+dbtable+" (ip,port,protocol) values (?,?,?)",(ip,port,protocol)) 
+                        except:
+                            pass
+            
+            con.commit()
         
         #Work out if the input is a single file or a folder 
         if os.path.isfile(args.xml):
