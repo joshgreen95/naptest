@@ -55,13 +55,19 @@ def xmlimport(xmlfile):
     for host in root.iterfind('host'):
         ip = host.find("./address").attrib['addr']
         hostname = []
-        for name in host.find("./hostnames"):
-            hostname.append(name.attrib['name'])
+        try:
+            for name in host.find("./hostnames"):
+                hostname.append(name.attrib['name'])
+        except:
+            pass
         osmatch =[]
-        for match in host.findall("./os/osmatch"):
-            name = match.attrib['name']
-            accuracy = match.attrib['accuracy']
-            osmatch.append((name,accuracy))
+        try:
+            for match in host.findall("./os/osmatch"):
+                name = match.attrib['name']
+                accuracy = match.attrib['accuracy']
+                osmatch.append((name,accuracy))
+        except:
+            pass
     
         # Identifies batches of closed ports    
         for extraport in host.findall("./ports/extraports"):
@@ -314,7 +320,7 @@ def outputfiles():
     for row in ip_list:
         ip = row['ip']
         osmatches = cur.execute('SELECT name,accuracy FROM osmatch where ip="'+str(ip)+'";').fetchall()
-        port_list = cur.execute('SELECT port,protocol,version from openports where ip="'+str(ip)+'";').fetchall()
+        port_list = cur.execute('SELECT port,protocol,version from openports where version!=NULL and ip="'+str(ip)+'";').fetchall()
         if osmatches or port_list:
             openfile = open (os.path.join(infodir,ip+".info"), 'w')
         if osmatches:
@@ -327,11 +333,28 @@ def outputfiles():
             for port,protocol,version in port_list:
                 if version != " ":
                     openfile.write(str(port)+"/"+protocol+"   "+version+"\n")
-
-
-
-
-
+                    
+    # Writes script output to files
+    con=lite.connect(db)
+    con.row_factory = lite.Row
+    cur = con.cursor()
+    ip_list = cur.execute('SELECT distinct ip from scripts;').fetchall()
+    if ip_list:
+        scriptdir = os.path.join(location, "scripts")
+        try:
+            os.mkdir(scriptdir)
+        except:
+            pass
+        for row in ip_list:
+            ip = row['ip']
+            script_list = cur.execute('SELECT id,port,output from scripts where ip="'+ip+'";').fetchall()
+            ipdir = os.path.join(scriptdir, str(ip))
+            os.mkdir(ipdir)
+            for id,port,output in script_list:
+                openfile = open (os.path.join(ipdir,str(id)), 'w')
+                openfile.write(ip+":"+str(port)+"\n\n")
+                openfile.write(str(output)+"\n")
+                openfile.close
 
 def filehandler(arginput):
     if os.path.isfile(arginput):
