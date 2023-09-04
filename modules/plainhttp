@@ -4,10 +4,10 @@
 
 "curl web headers": [ "ip", "web-headers", "curl -LI --connect-timeout 60 --insecure PROTO://HOST > DIR/HOST.PROTO.out", "tcp"],
 "CutyCapt": [ "ip", "cutycapt", "CutyCapt --url=PROTO://HOST --out=DIR/HOST.PROTO.png --insecure --delay=500", "tcp"],
+"nuclei technology detection": [ "ip", "nuclei", "/usr/bin/nuclei -t http/technologies/,http/exposures/ -u PROTO://HOST -o $PWD/DIR/HOST.PROTO.out", "tcp"],
 "dirb": [ "ip", "dirb", "dirb PROTO://HOST /repos/SecLists/Discovery/Web-Content/KitchensinkDirectories.fuzz.txt  -w -o DIR/HOST.PROTO.out", "tcp"],
 "nikto": [ "ip", "nikto", "nikto -h PROTO://HOST -output $PWD/DIR/HOST.PROTO.txt", "tcp"],
 "zap": [ "ip", "zap", "/usr/share/zaproxy/zap.sh -cmd -quickurl PROTO://HOST -quickprogress -quickout $PWD/DIR/HOST.PROTO.json", "tcp"],
-"nuclei technology detection": [ "ip", "nuclei", "/usr/bin/nuclei -t http/technologies/ -u PROTO://HOST -o $PWD/DIR/HOST.PROTO.out", "tcp"],
 
 
 
