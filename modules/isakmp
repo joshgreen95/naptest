@@ -3,7 +3,7 @@
 {
 
 "ike-scan-main": [ "ip", "ike-scan", "ike-scan -M IP > DIR/IP.main.out", "udp"],
-"ike-scan-aggressive": [ "ip", "ike-scan", "ike-scan -A IP > DIR/IP.aggessive.out", "udp"]
+"ike-scan-aggressive": [ "ip", "ike-scan", "ike-scan -A IP > DIR/IP.aggessive.out", "udp"],
 "ike-brute-main": [ "ip", "ike-brute", "/repos/testing-tool-repository/infrastructure-assessment/ike/ike-brut IP | tee DIR/IP.main.out", "udp"],
 "ike-brute-aggressive": [ "ip", "ike-brute", "/repos/testing-tool-repository/infrastructure-assessment/ike/ike-brut-aggressive IP | tee DIR/IP.aggressive.out", "udp"],
 

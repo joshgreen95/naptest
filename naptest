@@ -8,6 +8,7 @@ parser = argparse.ArgumentParser()
 parser = argparse.ArgumentParser(description="naptest- a framework to assist with security assessments.")
 parser.add_argument("xml", help="Path to the nmap XML output. Either a file or folder.")
 parser.add_argument("-o" , "--output", help="Directory for output", default="./")
+parser.add_argument("-m" , "--mode", help="Mode to run in: parse, monitor, test", default="parse")
 global args
 args = parser.parse_args()
 
@@ -19,6 +20,35 @@ svcfolder="services"
 global servicearray
 servicearray = {}
 db = os.path.join(args.output, dbfile)
+
+def nmap_xml_monitor(nmapdir):
+    import re
+    import xml.etree.ElementTree as ET
+    from datetime import datetime
+    directory = os.path.join(nmapdir)
+    if os.path.isdir(directory):
+        for xmlfile in os.listdir(directory):
+            if xmlfile.endswith('.xml'):
+                f = open(os.path.join(directory,xmlfile), 'r')
+                lastline = f.read().splitlines()[-1]
+                f.close()
+                status = ""
+                if lastline == "</nmaprun>":
+                    status = "Completed"
+                elif "taskprogress" in lastline:
+                    tree = ET.ElementTree(lastline)
+                    root = ET.fromstring(lastline)
+                    for name,value in root.attrib.items():
+                        if name in ["time","etc"]:
+                            value = datetime.fromtimestamp(int(value))
+                        status += "\n   "+name+": "+str(value)
+
+                else:
+                    status = "Running"
+                print(xmlfile+": "+status)
+                
+
+
 
 def xmlimport(xmlfile):
     import xml.etree.ElementTree as ET
@@ -365,7 +395,10 @@ def filehandler(arginput):
                 xmlimport(os.path.join(args.xml ,xmlfile))
 
 if __name__ == "__main__":
-    filehandler(args.xml)
-    findservices()
-    outputarray()
-    outputfiles()
+    if args.mode == "parse":
+        filehandler(args.xml)
+        findservices()
+        outputarray()
+        outputfiles()
+    if args.mode == "monitor":
+        nmap_xml_monitor(args.xml)
