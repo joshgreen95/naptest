@@ -24,29 +24,81 @@ db = os.path.join(args.output, dbfile)
 def nmap_xml_monitor(nmapdir):
     import re
     import xml.etree.ElementTree as ET
-    from datetime import datetime
+    import datetime
     directory = os.path.join(nmapdir)
     if os.path.isdir(directory):
+        nmap_status = {}
         for xmlfile in os.listdir(directory):
             if xmlfile.endswith('.xml'):
                 f = open(os.path.join(directory,xmlfile), 'r')
-                lastline = f.read().splitlines()[-1]
+                lastlines = f.read().splitlines()[-3:]
                 f.close()
+                nmap_status[xmlfile] = {}
                 status = ""
+                lastline = lastlines[2]
                 if lastline == "</nmaprun>":
+                    stats = "".join(lastlines[0:2])
+                    root = ET.fromstring(stats)
+                    hosts = root.find('hosts')
+                    up = hosts.attrib['up']
+                    total = hosts.attrib['total']
                     status = "Completed"
+                    details = {'up':up,'total':total}
+
                 elif "taskprogress" in lastline:
                     tree = ET.ElementTree(lastline)
                     root = ET.fromstring(lastline)
+                    status = "In Progress"
+                    details = {}
                     for name,value in root.attrib.items():
                         if name in ["time","etc"]:
-                            value = datetime.fromtimestamp(int(value))
-                        status += "\n   "+name+": "+str(value)
+                            value = datetime.datetime.fromtimestamp(int(value))
+                        details[name] = value
+                        
 
                 else:
                     status = "Running"
-                print(xmlfile+": "+status)
-                
+                nmap_status[xmlfile] = {'status':status,'details':details}
+        completed = []
+        livehosts = 0
+        scannedhosts = 0
+        inprogress = {}
+        running = []
+        for scan,values in nmap_status.items():
+            status = values['status']
+            details = values['details']
+            if status == "Completed":
+                completed.append(scan)
+                livehosts = livehosts + int(details['up'])
+                scannedhosts = scannedhosts + int(details['total'])
+            if status == "In Progress":
+                try:
+                    etc = details['etc']
+                    inprogress[etc] = scan
+                except:
+                    status = "Running"
+            if status == "Running":
+                running.append(scan)
+        if completed:
+            #print("The following "+str(len(completed))+" completed scans have found "+str(livehosts)+"/"+str(scannedhosts)+" live hosts.\n\n"+", ".join(completed)+"\n")
+            print(str(len(completed))+" completed scans have found "+str(livehosts)+"/"+str(scannedhosts)+" live hosts.\n\n")
+        if inprogress:
+            times = [60,300,600,3600,7200,21600]
+            now = datetime.datetime.now()
+            etclist = list(inprogress.keys())
+            etclist.sort()
+            previndex = 0
+            print("The following scans are in progress:\n")
+            for i,etc in enumerate(etclist):
+                topindex = i
+                timeremaining = etc - now
+                if timeremaining.total_seconds() < 0:
+                    timeremaining = "Now"
+                print(str(timeremaining).split(".")[0]+": "+inprogress[etc]+" ("+nmap_status[inprogress[etc]]['details']['task']+")")
+
+        if running:
+            print("The following scans are running without progress available at this time:\n"+"\n".join(running))
+
 
 
 
@@ -341,6 +393,17 @@ def outputfiles():
         if udplist:
             openfile.write("U:"+",".join(udplist))
         openfile.close()
+    
+    # Writes live IPs to file
+    con=lite.connect(db)
+    con.row_factory = None
+    con.text_factory = str
+    cur = con.cursor()
+    ip_list = cur.execute('select distinct ip from openports union select distinct ip from closedports;').fetchall()
+    openfile = open (os.path.join(infodir,"live.ips"), 'w')
+    for ip in ip_list:
+        openfile.write(''.join(ip)+"\n")
+    openfile.close()
 
     # Write OS matches and identified software versions to file
     con=lite.connect(db)
