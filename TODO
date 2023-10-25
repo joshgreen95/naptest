@@ -1,2 +1,3 @@
-* An abstraction of the paths for the tools- a dictionary perhaps. Maybe even attempt to locate them all? Will make it useful for more than just me.
-* output parsing of some sort?!
+* Incorporate testgen.py into naptest proper
+* Add ability to add 'scope' input, generate IPs (import ipaddress), and automatically nmap, parse, and testgen
+
