@@ -14,6 +14,10 @@ parser_scope.add_argument("-o", "--output", help="directory for output", default
 parser_scope.add_argument("-e", "--exclude", help="IPs to exclude. Comma separated.")
 parser_scope.add_argument("-a", "--autoexclude", help="Automatically exclude all your IPs (from all interfaces).", action="store_true")
 
+parser_scan = subparsers.add_parser('scan', help="scan mode will use arp-scan and nmap to identify live hosts.")
+parser_scan.set_defaults(dest="scan")
+parser_scan.add_argument("-o", "--output", help="directory for output", default="./")
+
 parser_parse = subparsers.add_parser('parse', help="parse mode will generate output based on completed nmap scans.")
 parser_parse.add_argument("xml", help="directory containing nmap output")
 parser_parse.add_argument("-o", "--output", help="directory for output", default="./")
@@ -32,15 +36,14 @@ args = parser.parse_args()
 dbfile="naptest.db"
 svcarrayfile="services.array"
 svcfolder="services"
-db = os.path.join(args.output, dbfile)
 
 def get_system_ips():
     import ipaddress,netifaces as ni
-    ips = []
+    ips = {}
     for nic in ni.interfaces():
         try:
             ip =  ni.ifaddresses(nic)[ni.AF_INET][0]['addr']
-            ips.append(ip)
+            ips[ip] = nic
         except:
             pass
     return ips
@@ -53,7 +56,7 @@ def db_connect():
     tables = cur.fetchall()
     if not tables:
         try:
-            cur.execute("CREATE TABLE scope (ip varchar(16), network varchar(19), status varchar(20));")
+            cur.execute("CREATE TABLE scope (ip varchar(16), network varchar(19), live integer(1), status varchar(20));")
             cur.execute("CREATE TABLE openports (ip varchar(16), port integer(5), protocol varchar(3), service varchar(100), tunnel varchar(4), version varchar(100));")
             cur.execute("CREATE TABLE closedports (ip varchar(16), port integer(5), range varchar(100), protocol varchar(3));")
             cur.execute("CREATE TABLE hostnames (hostname varchar(500), ip varchar(16));")
@@ -74,7 +77,7 @@ def scope_generator(file):
     import ipaddress
     exclusions = []
     if args.autoexclude:
-        exclusions += get_system_ips()
+        exclusions += list(get_system_ips().keys())
     con = db_connect()
     cur = con.cursor()
     f = open(file,'r')
@@ -91,12 +94,46 @@ def scope_generator(file):
                 scope_ips.append(ip)
                 try:
                     cur.execute("INSERT INTO scope (ip,network,status) values (?,?,?)",(str(ip),str(network),"new"))
-                except:
+                except Exception as error:
                     pass
     con.commit()
     if args.print:
         for ip in scope_ips:
             print(ip)
+
+def findlocalranges():
+    import ipaddress
+    con = db_connect()
+    cur = con.cursor()
+    #cur.row_factory = str
+    cur.execute("select distinct network from scope;")
+    networks = cur.fetchall()
+    systemips = get_system_ips()
+    results = {}
+    for ip in systemips.keys():
+        ip = "".join(ip)
+        for network in networks:
+            network = "".join(network)
+            if ipaddress.ip_address(ip) in ipaddress.ip_network(network):
+                interface = systemips[ip]
+                results[interface] = network
+    return results
+
+def arpscan(targets):
+    for interface,network in targets.items():
+        print(interface+":"+network)
+        scan = os.popen("echo 127.0.0.2;echo 127.0.0.3;echo 127.0.0.1")
+        output = scan.readlines()
+        for line in output:
+            ip = line.strip()
+            print(ip)
+            con = db_connect()
+            cur = con.cursor()
+            cur.execute("UPDATE scope set live = '1' where ip = ?",(ip,))
+        con.commit()
+
+
+
 
 
 def nmap_xml_monitor(nmapdir):
@@ -528,6 +565,7 @@ if __name__ == "__main__":
         print("Please select a subcommand")
         exit(1)
     if args.dest == "parse":
+        db = os.path.join(args.output, dbfile)
         global servicearray
         servicearray = {}
         filehandler(args.xml)
@@ -537,4 +575,9 @@ if __name__ == "__main__":
     elif args.dest == "status":
         nmap_xml_monitor(args.directory)
     elif args.dest == "scope":
+        db = os.path.join(args.output, dbfile)
         scope_generator(args.input)
+    elif args.dest == "scan":
+        db = os.path.join(args.output, dbfile)
+        arpscantargets = findlocalranges()
+        arpscan(arpscantargets)
