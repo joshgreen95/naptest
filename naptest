@@ -4,22 +4,59 @@
 import sys,sqlite3 as lite,os,argparse,ast
 
 #initiate argparsing
-parser = argparse.ArgumentParser()
-parser = argparse.ArgumentParser(description="naptest- a framework to assist with security assessments.")
-parser.add_argument("xml", help="Path to the nmap XML output. Either a file or folder.")
-parser.add_argument("-o" , "--output", help="Directory for output", default="./")
-parser.add_argument("-m" , "--mode", help="Mode to run in: parse, monitor, test", default="parse")
+#parser = argparse.ArgumentParser()
+#parser = argparse.ArgumentParser(description="naptest- a framework to assist with security assessments.")
+#parser.add_argument("-x" "--xml", help="Path to the nmap XML output. Either a file or folder.")
+#parser.add_argument("-o" , "--output", help="Directory for output", default="./")
+#parser.add_argument("-s" , "--scope", help="File containing scope")
+#parser.add_argument("-m" , "--mode", choices=['parse','status','test','scope'], help="Mode to run in: parse, status, test, scope", default="parse")
+#global args
+#args = parser.parse_args()
+# https://stackoverflow.com/questions/27411268/arguments-that-are-dependent-on-other-arguments-with-argparse
+# How to add subparsers for different modes
+parser = argparse.ArgumentParser(prog='naptest')
+subparsers = parser.add_subparsers(help='sub-command help')
+
+parser_scope = subparsers.add_parser('scope', help="scope mode will create a list of IPs from a list of ranges.")
+parser_scope.set_defaults(dest="scope")
+parser_scope.add_argument("input", help="File containing scope")
+parser_scope.add_argument("-p" , "--print", help="Print the IPs in scope", action="store_true")
+
+parser_parse = subparsers.add_parser('parse', help="parse mode will generate output based on completed nmap scans.")
+parser_parse.add_argument("xml", help="directory containing nmap output")
+parser_parse.add_argument("-o", "--output", help="directory for output", default="./")
+parser_parse.set_defaults(dest="parse")
+
+parser_status = subparsers.add_parser('status', help="status mode will show you the status of nmap scans.")
+parser_status.add_argument("directory", help="directory containing nmap output")
+parser_status.set_defaults(dest="status")
+
 global args
 args = parser.parse_args()
+
+
 
 #Magic Variables
 dbfile="naptest.db"
 svcarrayfile="services.array"
 svcfolder="services"
 
-global servicearray
-servicearray = {}
-db = os.path.join(args.output, dbfile)
+
+def scope_generator(file):
+    import ipaddress
+    f = open(file,'r')
+    scope = f.readlines()
+    f.close()
+    scope_ips = []
+    for line in scope:
+        scoped = line.strip()
+        network = ipaddress.ip_network(scoped, strict=False)
+        for ip in network:
+            scope_ips.append(ip)
+    if args.print:
+        for ip in scope_ips:
+            print(ip)
+
 
 def nmap_xml_monitor(nmapdir):
     import re
@@ -458,10 +495,20 @@ def filehandler(arginput):
                 xmlimport(os.path.join(args.xml ,xmlfile))
 
 if __name__ == "__main__":
-    if args.mode == "parse":
+    try:
+        args.dest
+    except:
+        print("Please select a subcommand")
+        exit(1)
+    if args.dest == "parse":
+        global servicearray
+        servicearray = {}
+        db = os.path.join(args.output, dbfile)
         filehandler(args.xml)
         findservices()
         outputarray()
         outputfiles()
-    if args.mode == "monitor":
-        nmap_xml_monitor(args.xml)
+    elif args.dest == "status":
+        nmap_xml_monitor(args.directory)
+    elif args.dest == "scope":
+        scope_generator(args.input)
