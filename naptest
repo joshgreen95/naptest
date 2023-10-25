@@ -3,17 +3,6 @@
 
 import sys,sqlite3 as lite,os,argparse,ast
 
-#initiate argparsing
-#parser = argparse.ArgumentParser()
-#parser = argparse.ArgumentParser(description="naptest- a framework to assist with security assessments.")
-#parser.add_argument("-x" "--xml", help="Path to the nmap XML output. Either a file or folder.")
-#parser.add_argument("-o" , "--output", help="Directory for output", default="./")
-#parser.add_argument("-s" , "--scope", help="File containing scope")
-#parser.add_argument("-m" , "--mode", choices=['parse','status','test','scope'], help="Mode to run in: parse, status, test, scope", default="parse")
-#global args
-#args = parser.parse_args()
-# https://stackoverflow.com/questions/27411268/arguments-that-are-dependent-on-other-arguments-with-argparse
-# How to add subparsers for different modes
 parser = argparse.ArgumentParser(prog='naptest')
 subparsers = parser.add_subparsers(help='sub-command help')
 
@@ -23,6 +12,7 @@ parser_scope.add_argument("input", help="File containing scope")
 parser_scope.add_argument("-p" , "--print", help="Print the IPs in scope", action="store_true")
 parser_scope.add_argument("-o", "--output", help="directory for output", default="./")
 parser_scope.add_argument("-e", "--exclude", help="IPs to exclude. Comma separated.")
+parser_scope.add_argument("-a", "--autoexclude", help="Automatically exclude all your IPs (from all interfaces).", action="store_true")
 
 parser_parse = subparsers.add_parser('parse', help="parse mode will generate output based on completed nmap scans.")
 parser_parse.add_argument("xml", help="directory containing nmap output")
@@ -44,6 +34,18 @@ svcarrayfile="services.array"
 svcfolder="services"
 db = os.path.join(args.output, dbfile)
 
+def get_system_ips():
+    import ipaddress,netifaces as ni
+    ips = []
+    for nic in ni.interfaces():
+        try:
+            ip =  ni.ifaddresses(nic)[ni.AF_INET][0]['addr']
+            ips.append(ip)
+        except:
+            pass
+    return ips
+
+
 def db_connect():
     con = lite.connect(db)
     cur = con.cursor()
@@ -51,12 +53,13 @@ def db_connect():
     tables = cur.fetchall()
     if not tables:
         try:
-            cur.execute("CREATE TABLE scope (ip varchar(16), status varchar(20));")
+            cur.execute("CREATE TABLE scope (ip varchar(16), network varchar(19), status varchar(20));")
             cur.execute("CREATE TABLE openports (ip varchar(16), port integer(5), protocol varchar(3), service varchar(100), tunnel varchar(4), version varchar(100));")
             cur.execute("CREATE TABLE closedports (ip varchar(16), port integer(5), range varchar(100), protocol varchar(3));")
             cur.execute("CREATE TABLE hostnames (hostname varchar(500), ip varchar(16));")
             cur.execute("CREATE TABLE osmatch (name varchar(100), accuracy int(3), ip varchar(16));")
             cur.execute("CREATE TABLE scripts (id varchar(100), ip varchar(16), port integer(5), output varchar(512));")
+            cur.execute("CREATE UNIQUE INDEX scopedip ON scope (ip);")
             cur.execute("CREATE UNIQUE INDEX opencheck ON openports (ip,port,protocol);")
             cur.execute("CREATE UNIQUE INDEX closedcheckip ON closedports (ip,port,protocol);")
             cur.execute("CREATE UNIQUE INDEX closedcheckrange ON closedports (ip,range,protocol);")
@@ -69,20 +72,27 @@ def db_connect():
 
 def scope_generator(file):
     import ipaddress
+    exclusions = []
+    if args.autoexclude:
+        exclusions += get_system_ips()
     con = db_connect()
     cur = con.cursor()
     f = open(file,'r')
     scope = f.readlines()
     f.close()
     scope_ips = []
-    exclusions = args.exclude.split(',')
+    if args.exclude:
+        exclusions += args.exclude.split(',')
     for line in scope:
         scoped = line.strip()
         network = ipaddress.ip_network(scoped, strict=False)
         for ip in network:
             if str(ip) not in exclusions:
                 scope_ips.append(ip)
-                cur.execute("INSERT INTO scope (ip,status) values (?,?)",(str(ip),"new")) 
+                try:
+                    cur.execute("INSERT INTO scope (ip,network,status) values (?,?,?)",(str(ip),str(network),"new"))
+                except:
+                    pass
     con.commit()
     if args.print:
         for ip in scope_ips:
@@ -203,6 +213,7 @@ def xmlimport(xmlfile):
                 osmatch.append((name,accuracy))
         except:
             pass
+        cur.execute("UPDATE scope set status = 'scanned' where ip = ?",(ip,))
     
         # Identifies batches of closed ports    
         for extraport in host.findall("./ports/extraports"):
