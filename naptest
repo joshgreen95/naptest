@@ -21,6 +21,8 @@ parser_scope = subparsers.add_parser('scope', help="scope mode will create a lis
 parser_scope.set_defaults(dest="scope")
 parser_scope.add_argument("input", help="File containing scope")
 parser_scope.add_argument("-p" , "--print", help="Print the IPs in scope", action="store_true")
+parser_scope.add_argument("-o", "--output", help="directory for output", default="./")
+parser_scope.add_argument("-e", "--exclude", help="IPs to exclude. Comma separated.")
 
 parser_parse = subparsers.add_parser('parse', help="parse mode will generate output based on completed nmap scans.")
 parser_parse.add_argument("xml", help="directory containing nmap output")
@@ -40,19 +42,48 @@ args = parser.parse_args()
 dbfile="naptest.db"
 svcarrayfile="services.array"
 svcfolder="services"
+db = os.path.join(args.output, dbfile)
 
+def db_connect():
+    con = lite.connect(db)
+    cur = con.cursor()
+    cur.execute("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name;")
+    tables = cur.fetchall()
+    if not tables:
+        try:
+            cur.execute("CREATE TABLE scope (ip varchar(16), status varchar(20));")
+            cur.execute("CREATE TABLE openports (ip varchar(16), port integer(5), protocol varchar(3), service varchar(100), tunnel varchar(4), version varchar(100));")
+            cur.execute("CREATE TABLE closedports (ip varchar(16), port integer(5), range varchar(100), protocol varchar(3));")
+            cur.execute("CREATE TABLE hostnames (hostname varchar(500), ip varchar(16));")
+            cur.execute("CREATE TABLE osmatch (name varchar(100), accuracy int(3), ip varchar(16));")
+            cur.execute("CREATE TABLE scripts (id varchar(100), ip varchar(16), port integer(5), output varchar(512));")
+            cur.execute("CREATE UNIQUE INDEX opencheck ON openports (ip,port,protocol);")
+            cur.execute("CREATE UNIQUE INDEX closedcheckip ON closedports (ip,port,protocol);")
+            cur.execute("CREATE UNIQUE INDEX closedcheckrange ON closedports (ip,range,protocol);")
+            cur.execute("CREATE UNIQUE INDEX scriptcheck ON scripts (id,ip,port);")
+            cur.execute("CREATE UNIQUE INDEX hostnamecheck ON hostnames (hostname,ip);")
+            cur.execute("CREATE UNIQUE INDEX osmatchcheck ON osmatch (name,accuracy,ip);")
+        except Exception as e:
+            pass
+    return con
 
 def scope_generator(file):
     import ipaddress
+    con = db_connect()
+    cur = con.cursor()
     f = open(file,'r')
     scope = f.readlines()
     f.close()
     scope_ips = []
+    exclusions = args.exclude.split(',')
     for line in scope:
         scoped = line.strip()
         network = ipaddress.ip_network(scoped, strict=False)
         for ip in network:
-            scope_ips.append(ip)
+            if str(ip) not in exclusions:
+                scope_ips.append(ip)
+                cur.execute("INSERT INTO scope (ip,status) values (?,?)",(str(ip),"new")) 
+    con.commit()
     if args.print:
         for ip in scope_ips:
             print(ip)
@@ -141,7 +172,9 @@ def nmap_xml_monitor(nmapdir):
 
 def xmlimport(xmlfile):
     import xml.etree.ElementTree as ET
-    con = lite.connect(db)
+    con = db_connect()
+    cur = con.cursor()
+    cur.row_factory = lambda cursor, row: row[0]
 
     try:
         tree = ET.ElementTree(file = xmlfile)
@@ -150,23 +183,6 @@ def xmlimport(xmlfile):
         print("[!] Error parsing XML from: "+xmlfile)
         return
 
-    #Create Database tables
-    cur = con.cursor()
-    cur.row_factory = lambda cursor, row: row[0]
-    try:
-        cur.execute("CREATE TABLE openports (ip varchar(16), port integer(5), protocol varchar(3), service varchar(100), tunnel varchar(4), version varchar(100));")
-        cur.execute("CREATE TABLE closedports (ip varchar(16), port integer(5), range varchar(100), protocol varchar(3));")
-        cur.execute("CREATE TABLE hostnames (hostname varchar(500), ip varchar(16));")
-        cur.execute("CREATE TABLE osmatch (name varchar(100), accuracy int(3), ip varchar(16));")
-        cur.execute("CREATE TABLE scripts (id varchar(100), ip varchar(16), port integer(5), output varchar(512));")
-        cur.execute("CREATE UNIQUE INDEX opencheck ON openports (ip,port,protocol);")
-        cur.execute("CREATE UNIQUE INDEX closedcheckip ON closedports (ip,port,protocol);")
-        cur.execute("CREATE UNIQUE INDEX closedcheckrange ON closedports (ip,range,protocol);")
-        cur.execute("CREATE UNIQUE INDEX scriptcheck ON scripts (id,ip,port);")
-        cur.execute("CREATE UNIQUE INDEX hostnamecheck ON hostnames (hostname,ip);")
-        cur.execute("CREATE UNIQUE INDEX osmatchcheck ON osmatch (name,accuracy,ip);")
-    except Exception as e:
-        pass
 
     # Loop through and pull out the data for the db
 
@@ -503,7 +519,6 @@ if __name__ == "__main__":
     if args.dest == "parse":
         global servicearray
         servicearray = {}
-        db = os.path.join(args.output, dbfile)
         filehandler(args.xml)
         findservices()
         outputarray()
