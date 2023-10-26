@@ -17,6 +17,7 @@ parser_scope.add_argument("-a", "--autoexclude", help="Automatically exclude all
 parser_scan = subparsers.add_parser('scan', help="scan mode will use arp-scan and nmap to identify live hosts.")
 parser_scan.set_defaults(dest="scan")
 parser_scan.add_argument("-o", "--output", help="directory for output", default="./")
+parser_scan.add_argument("-p", "--parallel", help="number of scans to run in parallel", type=int, default="10")
 
 parser_parse = subparsers.add_parser('parse', help="parse mode will generate output based on completed nmap scans.")
 parser_parse.add_argument("xml", help="directory containing nmap output")
@@ -56,7 +57,7 @@ def db_connect():
     tables = cur.fetchall()
     if not tables:
         try:
-            cur.execute("CREATE TABLE scope (ip varchar(16), network varchar(19), live integer(1), status varchar(20));")
+            cur.execute("CREATE TABLE scope (ip varchar(16), network varchar(19), live integer(1) default 0, excluded integer(1) default 0, arpscan integer(1) default 0, discoveryscan integer(1) default 0, top20scan integer(1) default 0);")
             cur.execute("CREATE TABLE openports (ip varchar(16), port integer(5), protocol varchar(3), service varchar(100), tunnel varchar(4), version varchar(100));")
             cur.execute("CREATE TABLE closedports (ip varchar(16), port integer(5), range varchar(100), protocol varchar(3));")
             cur.execute("CREATE TABLE hostnames (hostname varchar(500), ip varchar(16));")
@@ -89,13 +90,24 @@ def scope_generator(file):
     for line in scope:
         scoped = line.strip()
         network = ipaddress.ip_network(scoped, strict=False)
+        scoped_ips = 0
+        excluded_ips = 0
         for ip in network:
+            excluded = 0
             if str(ip) not in exclusions:
                 scope_ips.append(ip)
-                try:
-                    cur.execute("INSERT INTO scope (ip,network,status) values (?,?,?)",(str(ip),str(network),"new"))
-                except Exception as error:
-                    pass
+                scoped_ips += 1
+            else:
+                excluded = 1
+                excluded_ips += 1
+            try:
+                cur.execute("INSERT INTO scope (ip,network,excluded) values (?,?,?)",(str(ip),str(network),excluded))
+            except Exception as error:
+                pass
+        for ip in exclusions:
+            cur.execute("UPDATE  scope set excluded = 1 where ip = ?",(str(ip),))
+    print("[+] "+str(scoped_ips)+" in scope IPs added. "+str(excluded_ips)+" exclusions were added.")
+
     con.commit()
     if args.print:
         for ip in scope_ips:
@@ -119,18 +131,123 @@ def findlocalranges():
                 results[interface] = network
     return results
 
+def liveip(ip):
+    con = db_connect()
+    cur = con.cursor()
+    cur.execute("UPDATE scope set live = 1 where ip = ?",(ip,))
+    con.commit()
+    con.close()
+
 def arpscan(targets):
     for interface,network in targets.items():
-        print(interface+":"+network)
-        scan = os.popen("echo 127.0.0.2;echo 127.0.0.3;echo 127.0.0.1")
+        con = db_connect()
+        cur = con.cursor()
+        cur.execute("select ip from scope where network = ? and excluded != 1 and arpscan = 0;",(str(network),))
+        ips = []
+        ips += [x[0] for x in cur.fetchall()]
+        if not ips:
+            print("[+] no hosts require arp-scans")
+            return
+        print("[+] Performing arp-scan of scoped hosts in "+network+" from "+interface)
+        scan = os.popen("arp-scan -r 2 -x -g --format='${ip}' --bandwidth=25K -I "+interface+" --file=<(printf \""+"\n".join(ips)+"\")")
         output = scan.readlines()
         for line in output:
             ip = line.strip()
-            print(ip)
-            con = db_connect()
-            cur = con.cursor()
-            cur.execute("UPDATE scope set live = '1' where ip = ?",(ip,))
+            liveip(ip)
+        for ip in ips:
+            cur.execute("update scope set arpscan = 1 where ip = ?",(str(ip),))
+            con.commit()
+        print("[*] "+str(len(output))+" live hosts found out of "+str(len(ips)))
+
+def discoveryscan():
+    import ipaddress
+    con = db_connect()
+    cur = con.cursor()
+    cur.execute("select ip from scope where live = 0 and excluded != 1 and discoveryscan = 0;")
+    ips = []
+    ips += [x[0] for x in cur.fetchall()]
+    if not ips:
+        print("[+] no hosts require host discovery")
+        return
+    print("[+] Performing nmap host discovery scan of "+str(len(ips))+" ips")
+    scan = os.popen("nmap -n -sn -iL=<(printf \""+"\n".join(ips)+"\")")
+    output = scan.readlines()
+    newliveips = 0
+    for line in output:
+        if line.startswith("Nmap scan report for "):
+            words = line.split(" ")
+            for word in words:
+                try:
+                    ip = word.strip()
+                    ipaddress.ip_address(ip)
+                    liveip(ip)
+                    newliveips += 1
+                except Exception as e:
+                    pass
+    for ip in ips:
+        cur.execute("update scope set discoveryscan = 1 where ip = ?",(str(ip),))
         con.commit()
+    print("[*] "+str(newliveips)+" live hosts found")
+
+def nmap(command):
+    import ipaddress
+    scan = os.popen(command)
+    output = scan.readlines()
+    newliveips = 0
+    for line in output:
+        if line.startswith("Nmap scan report for "):
+            words = line.split(" ")
+            for word in words:
+                try:
+                    ip = word.strip()
+                    ipaddress.ip_address(ip)
+                    liveip(ip)
+                    newliveips += 1
+                except Exception as e:
+                    pass
+    return str(newliveips)
+    
+
+def top20scan():
+    from multiprocessing.pool import ThreadPool
+    if os.geteuid() != 0:
+        print("[!] nmap top20 scan requires root privileges")
+        exit(1)
+    con = db_connect()
+    cur = con.cursor()
+    cur.execute("select ip from scope where live=0 and top20scan=0 and excluded=0;")
+    ips = []
+    ips += [x[0] for x in cur.fetchall()]
+    if not ips:
+        print("[+] no hosts require top20 scans")
+        return
+    commands = []
+    for ip in ips:
+        commands.append("nmap -n -Pn -T4 -sS --top-ports 20 "+ip)
+    newliveips = 0
+    num = args.parallel  # set to the number of workers you want (it defaults to the cpu count of your machine)
+    tp = ThreadPool(num)
+    print("[+] "+str(num)+" parallel nmap top20 scans running. "+str(len(commands))+" scans in total.")
+    scannum = 0
+    newliveips = 0
+    for command in commands:
+        result = tp.apply_async(nmap, (command,))
+        if result.get():
+            newips = int(result.get())
+            newliveips = newliveips + newips
+            scannum +=1
+            print("[*] "+str(scannum)+" scans completed. "+str(newliveips)+" new live IPs", end="\r")
+
+    tp.close()
+    tp.join()
+    for ip in ips:
+        cur.execute("update scope set top20scan = 1 where ip = ?",(str(ip),))
+        con.commit()
+    print("[*] completed "+str(len(commands))+" scans")
+
+
+
+
 
 
 
@@ -581,3 +698,5 @@ if __name__ == "__main__":
         db = os.path.join(args.output, dbfile)
         arpscantargets = findlocalranges()
         arpscan(arpscantargets)
+        discoveryscan()
+        top20scan()
