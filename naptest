@@ -87,11 +87,11 @@ def scope_generator(file):
     scope_ips = []
     if args.exclude:
         exclusions += args.exclude.split(',')
+    scoped_ips = 0
+    excluded_ips = 0
     for line in scope:
         scoped = line.strip()
         network = ipaddress.ip_network(scoped, strict=False)
-        scoped_ips = 0
-        excluded_ips = 0
         for ip in network:
             excluded = 0
             if str(ip) not in exclusions:
@@ -106,7 +106,7 @@ def scope_generator(file):
                 pass
         for ip in exclusions:
             cur.execute("UPDATE  scope set excluded = 1 where ip = ?",(str(ip),))
-    print("[+] "+str(scoped_ips)+" in scope IPs added. "+str(excluded_ips)+" exclusions were added.")
+    print("[+] "+str(scoped_ips)+" in scope IPs. "+str(excluded_ips)+" exclusions are present.")
 
     con.commit()
     if args.print:
@@ -205,11 +205,12 @@ def nmap(command):
                     newliveips += 1
                 except Exception as e:
                     pass
-    return str(newliveips)
+    return newliveips
     
 
 def top20scan():
     from multiprocessing.pool import ThreadPool
+    import time
     if os.geteuid() != 0:
         print("[!] nmap top20 scan requires root privileges")
         exit(1)
@@ -225,20 +226,20 @@ def top20scan():
     for ip in ips:
         commands.append("nmap -n -Pn -T4 -sS --top-ports 20 "+ip)
     newliveips = 0
-    num = args.parallel  # set to the number of workers you want (it defaults to the cpu count of your machine)
+    num = args.parallel
     tp = ThreadPool(num)
     print("[+] "+str(num)+" parallel nmap top20 scans running. "+str(len(commands))+" scans in total.")
     scannum = 0
     newliveips = 0
+    results = []
     for command in commands:
-        result = tp.apply_async(nmap, (command,))
-        if result.get():
-            newips = int(result.get())
-            newliveips = newliveips + newips
-            scannum +=1
-            print("[*] "+str(scannum)+" scans completed. "+str(newliveips)+" new live IPs", end="\r")
-
+        tp.apply_async(nmap, (command,),callback=results.append)
     tp.close()
+    while True:
+        if len(results) == len(commands):
+            break
+        print("[*] "+str(len(results))+" scans completed. "+str(sum(results))+" live ips found", end="\r")
+        time.sleep(1)
     tp.join()
     for ip in ips:
         cur.execute("update scope set top20scan = 1 where ip = ?",(str(ip),))
