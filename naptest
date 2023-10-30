@@ -14,10 +14,11 @@ parser_scope.add_argument("-o", "--output", help="directory for output", default
 parser_scope.add_argument("-e", "--exclude", help="IPs to exclude. Comma separated.")
 parser_scope.add_argument("-a", "--autoexclude", help="Automatically exclude all your IPs (from all interfaces).", action="store_true")
 
-parser_scan = subparsers.add_parser('scan', help="scan mode will use arp-scan and nmap to identify live hosts.")
+parser_scan = subparsers.add_parser('scan', help="scan mode will attempt to identify and scan in scope hosts. By default it will arp-scan any local IPs, perform an nmap host discovery scan, and then a top20 port TCP scan.")
 parser_scan.set_defaults(dest="scan")
 parser_scan.add_argument("-o", "--output", help="directory for output", default="./")
 parser_scan.add_argument("-p", "--parallel", help="number of scans to run in parallel", type=int, default="10")
+parser_scan.add_argument("--no-discovery", help="skip discovery scans and fully nmap scan every in scope address", default=False, action="store_true")
 
 parser_parse = subparsers.add_parser('parse', help="parse mode will generate output based on completed nmap scans.")
 parser_parse.add_argument("xml", help="directory containing nmap output")
@@ -56,22 +57,22 @@ def db_connect():
     cur.execute("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name;")
     tables = cur.fetchall()
     if not tables:
-        try:
-            cur.execute("CREATE TABLE scope (ip varchar(16), network varchar(19), live integer(1) default 0, excluded integer(1) default 0, arpscan integer(1) default 0, discoveryscan integer(1) default 0, top20scan integer(1) default 0);")
-            cur.execute("CREATE TABLE openports (ip varchar(16), port integer(5), protocol varchar(3), service varchar(100), tunnel varchar(4), version varchar(100));")
-            cur.execute("CREATE TABLE closedports (ip varchar(16), port integer(5), range varchar(100), protocol varchar(3));")
-            cur.execute("CREATE TABLE hostnames (hostname varchar(500), ip varchar(16));")
-            cur.execute("CREATE TABLE osmatch (name varchar(100), accuracy int(3), ip varchar(16));")
-            cur.execute("CREATE TABLE scripts (id varchar(100), ip varchar(16), port integer(5), output varchar(512));")
-            cur.execute("CREATE UNIQUE INDEX scopedip ON scope (ip);")
-            cur.execute("CREATE UNIQUE INDEX opencheck ON openports (ip,port,protocol);")
-            cur.execute("CREATE UNIQUE INDEX closedcheckip ON closedports (ip,port,protocol);")
-            cur.execute("CREATE UNIQUE INDEX closedcheckrange ON closedports (ip,range,protocol);")
-            cur.execute("CREATE UNIQUE INDEX scriptcheck ON scripts (id,ip,port);")
-            cur.execute("CREATE UNIQUE INDEX hostnamecheck ON hostnames (hostname,ip);")
-            cur.execute("CREATE UNIQUE INDEX osmatchcheck ON osmatch (name,accuracy,ip);")
-        except Exception as e:
-            pass
+        #try:
+        cur.execute("CREATE TABLE scope (ip varchar(16), network varchar(19), live integer(1) default 0, excluded integer(1) default 0, arpscan integer(1) default 0, discoveryscan integer(1) default 0, top20scan integer(1) default 0, nmapprocessed integer(1) default 0, fulltcpscan integer(1) default 0, fulludpscan integer(1) default 0);")
+        cur.execute("CREATE TABLE openports (ip varchar(16), port integer(5), protocol varchar(3), service varchar(100), tunnel varchar(4), version varchar(100));")
+        cur.execute("CREATE TABLE closedports (ip varchar(16), port integer(5), range varchar(100), protocol varchar(3));")
+        cur.execute("CREATE TABLE hostnames (hostname varchar(500), ip varchar(16));")
+        cur.execute("CREATE TABLE osmatch (name varchar(100), accuracy int(3), ip varchar(16));")
+        cur.execute("CREATE TABLE scripts (id varchar(100), ip varchar(16), port integer(5), output varchar(512));")
+        cur.execute("CREATE UNIQUE INDEX scopedip ON scope (ip);")
+        cur.execute("CREATE UNIQUE INDEX opencheck ON openports (ip,port,protocol);")
+        cur.execute("CREATE UNIQUE INDEX closedcheckip ON closedports (ip,port,protocol);")
+        cur.execute("CREATE UNIQUE INDEX closedcheckrange ON closedports (ip,range,protocol);")
+        cur.execute("CREATE UNIQUE INDEX scriptcheck ON scripts (id,ip,port);")
+        cur.execute("CREATE UNIQUE INDEX hostnamecheck ON hostnames (hostname,ip);")
+        cur.execute("CREATE UNIQUE INDEX osmatchcheck ON osmatch (name,accuracy,ip);")
+        #except Exception as e:
+        #    print(e)
     return con
 
 def scope_generator(file):
@@ -109,6 +110,7 @@ def scope_generator(file):
     print("[+] "+str(scoped_ips)+" in scope IPs. "+str(excluded_ips)+" exclusions are present.")
 
     con.commit()
+    con.close()
     if args.print:
         for ip in scope_ips:
             print(ip)
@@ -130,11 +132,12 @@ def findlocalranges():
                 interface = systemips[ip]
                 results[interface] = network
     return results
+    con.close()
 
-def liveip(ip):
+def settrue(ip,column):
     con = db_connect()
     cur = con.cursor()
-    cur.execute("UPDATE scope set live = 1 where ip = ?",(ip,))
+    cur.execute("UPDATE scope set "+column+" = 1 where ip = ?",(ip,))
     con.commit()
     con.close()
 
@@ -145,6 +148,7 @@ def arpscan(targets):
         cur.execute("select ip from scope where network = ? and excluded != 1 and arpscan = 0;",(str(network),))
         ips = []
         ips += [x[0] for x in cur.fetchall()]
+        con.close()
         if not ips:
             print("[+] no hosts require arp-scans")
             return
@@ -153,10 +157,9 @@ def arpscan(targets):
         output = scan.readlines()
         for line in output:
             ip = line.strip()
-            liveip(ip)
+            settrue(ip,"live")
         for ip in ips:
-            cur.execute("update scope set arpscan = 1 where ip = ?",(str(ip),))
-            con.commit()
+            settrue(ip,"arpscan")
         print("[*] "+str(len(output))+" live hosts found out of "+str(len(ips)))
 
 def discoveryscan():
@@ -166,6 +169,7 @@ def discoveryscan():
     cur.execute("select ip from scope where live = 0 and excluded != 1 and discoveryscan = 0;")
     ips = []
     ips += [x[0] for x in cur.fetchall()]
+    con.close()
     if not ips:
         print("[+] no hosts require host discovery")
         return
@@ -180,31 +184,34 @@ def discoveryscan():
                 try:
                     ip = word.strip()
                     ipaddress.ip_address(ip)
-                    liveip(ip)
+                    settrue(ip,"live")
                     newliveips += 1
                 except Exception as e:
                     pass
     for ip in ips:
-        cur.execute("update scope set discoveryscan = 1 where ip = ?",(str(ip),))
-        con.commit()
+        settrue(ip,"discoveryscan")
     print("[*] "+str(newliveips)+" live hosts found")
 
-def nmap(command):
+def nmap(command, target, scantype, outfile):
     import ipaddress
     scan = os.popen(command)
     output = scan.readlines()
     newliveips = 0
-    for line in output:
-        if line.startswith("Nmap scan report for "):
-            words = line.split(" ")
-            for word in words:
-                try:
-                    ip = word.strip()
-                    ipaddress.ip_address(ip)
-                    liveip(ip)
-                    newliveips += 1
-                except Exception as e:
-                    pass
+    if scantype == "top20scan":
+        for line in output:
+            if line.startswith("Nmap scan report for "):
+                words = line.split(" ")
+                for word in words:
+                    try:
+                        ip = word.strip()
+                        ipaddress.ip_address(ip)
+                        settrue(ip,"live")
+                        newliveips += 1
+                    except Exception as e:
+                        pass
+    settrue(target,scantype)
+    if scantype in ["fulltcpscan","fulludpscan"]:
+        xmlimport(outfile+".xml")
     return newliveips
     
 
@@ -219,21 +226,19 @@ def top20scan():
     cur.execute("select ip from scope where live=0 and top20scan=0 and excluded=0;")
     ips = []
     ips += [x[0] for x in cur.fetchall()]
+    con.close()
     if not ips:
         print("[+] no hosts require top20 scans")
         return
     commands = []
     for ip in ips:
-        commands.append("nmap -n -Pn -T4 -sS --top-ports 20 "+ip)
-    newliveips = 0
+        commands.append(("nmap -n -Pn -T4 -sS --top-ports 20 "+ip, ip))
     num = args.parallel
     tp = ThreadPool(num)
     print("[+] "+str(num)+" parallel nmap top20 scans running. "+str(len(commands))+" scans in total.")
-    scannum = 0
-    newliveips = 0
     results = []
-    for command in commands:
-        tp.apply_async(nmap, (command,),callback=results.append)
+    for command,target in commands:
+        tp.apply_async(nmap, (command,target,"top20scan",None),callback=results.append)
     tp.close()
     while True:
         if len(results) == len(commands):
@@ -241,96 +246,155 @@ def top20scan():
         print("[*] "+str(len(results))+" scans completed. "+str(sum(results))+" live ips found", end="\r")
         time.sleep(1)
     tp.join()
-    for ip in ips:
-        cur.execute("update scope set top20scan = 1 where ip = ?",(str(ip),))
-        con.commit()
     print("[*] completed "+str(len(commands))+" scans")
 
 
-
-
-
-
-
-
+def fullnmapscan(targets):
+    from multiprocessing.pool import ThreadPool
+    import time
+    if os.geteuid() != 0:
+        print("[!] nmap full scan requires root privileges")
+        exit(1)
+    nmapdir = os.path.join(args.output,"nmap")
+    try:
+        os.mkdir(nmapdir)
+    except:
+        pass
+    con = db_connect()
+    cur = con.cursor()
+    if targets == "live":
+        live = "1"
+        cur.execute("select ip from scope where live="+live+" and fulltcpscan=0 and fulludpscan=0 excluded=0;")
+    elif targets == "notlive":
+        live = "0"
+        cur.execute("select ip from scope where live="+live+" and fulltcpscan=0 and fulludpscan=0 and excluded=0;")
+    elif targets == "all":
+        cur.execute("select ip from scope where fulltcpscan=0 and fulludpscan=0 and excluded=0;")
+    ips = []
+    ips += [x[0] for x in cur.fetchall()]
+    con.close()
+    if not ips:
+        print("[+] no hosts require full nmap scans")
+        return
+    tcpcommands = []
+    udpcommands = []
+    for ip in ips:
+        tcpfile = os.path.join(nmapdir,"nmap.tcp."+ip)
+        udpfile = os.path.join(nmapdir,"nmap.udp."+ip)
+        tcpcommands.append(("nmap --disable-arp-ping -vvv -d -d  -Pn -p- -sS -sV -O -T4 -oA "+tcpfile+" --max-retries 3 "+ip+" &>/dev/null",ip,"fulltcpscan",tcpfile))
+        udpcommands.append(("nmap -vvv -d -d  -Pn -p $(grep \"^Probe UDP\" -A 2 /usr/share/nmap/nmap-service-probes| grep -v \"rarity\|Probe\|--\"| cut -f2 -d \" \" | grep \"^[0-9]\"| tr \",\" \"\n\" | sort | uniq| tr \"\n\" \",\") -sU -T4 -oA "+udpfile+" "+ip+" &>/dev/null",ip,"fulludpscan",udpfile))
+    commands = tcpcommands + udpcommands
+    num = args.parallel
+    tp = ThreadPool(num)
+    print("[+] "+str(num)+" parallel nmap full scans running. "+str(len(commands))+" scans in total.")
+    results = []
+    for command,target,scantype,outfile in commands:
+        tp.apply_async(nmap, (command,target,scantype,outfile),callback=results.append)
+    tp.close()
+    nmap_xml_monitor(nmapdir)
+    tp.join()
+    #for ip in ips:
+    #    settrue(ip,"fullnmapscan")
+    print("[*] completed "+str(len(commands))+" scans")
 
 def nmap_xml_monitor(nmapdir):
     import re
     import xml.etree.ElementTree as ET
-    import datetime
+    import datetime,time,random
     directory = os.path.join(nmapdir)
-    if os.path.isdir(directory):
-        nmap_status = {}
-        for xmlfile in os.listdir(directory):
-            if xmlfile.endswith('.xml'):
-                f = open(os.path.join(directory,xmlfile), 'r')
-                lastlines = f.read().splitlines()[-3:]
-                f.close()
-                nmap_status[xmlfile] = {}
-                status = ""
-                lastline = lastlines[2]
-                if lastline == "</nmaprun>":
-                    stats = "".join(lastlines[0:2])
-                    root = ET.fromstring(stats)
-                    hosts = root.find('hosts')
-                    up = hosts.attrib['up']
-                    total = hosts.attrib['total']
-                    status = "Completed"
-                    details = {'up':up,'total':total}
+    outputlen = 0
+    round = 0
+    nmap_status = {}
+    while True:
+        output = []
+        if os.path.isdir(directory):
+            for xmlfile in os.listdir(directory):
+                if xmlfile.endswith('.xml'):
+                    f = open(os.path.join(directory,xmlfile), 'r')
+                    lastlines = f.read().splitlines()[-3:]
+                    f.close()
+                    nmap_status[xmlfile] = {}
+                    status = ""
+                    lastline = lastlines[-1:][0]
+                    if lastline == "</nmaprun>":
+                        stats = "".join(lastlines[0:2])
+                        root = ET.fromstring(stats)
+                        hosts = root.find('hosts')
+                        up = hosts.attrib['up']
+                        total = hosts.attrib['total']
+                        status = "Completed"
+                        details = {'up':up,'total':total}
+                    else:
+                        lastlines.reverse()
+                        for lastline in lastlines:
+                            try:
+                                if "taskprogress" in lastline or "taskbegin" in lastline:
+                                    details = {}
+                                    root = ET.fromstring(lastline)
+                                    status = "In Progress"
+                                    for name,value in root.attrib.items():
+                                        if name in ["time","etc"]:
+                                            value = datetime.datetime.fromtimestamp(int(value))
+                                        details[name] = value
+                                    break
+                            except:
+                                details = {}
+                                status = "Running"
+                    nmap_status[xmlfile] = {'status':status,'details':details}
+            # Print the recovered data for troubleshooting
+            #for key,values in nmap_status.items():
+                #output.append(key+":"+str(values))
+            
+            completed = []
+            livehosts = 0
+            scannedhosts = 0
+            inprogress = {}
+            running = []
+            for scan,values in nmap_status.items():
+                status = values['status']
+                details = values['details']
+                if status == "Completed":
+                    completed.append(scan)
+                    livehosts = livehosts + int(details['up'])
+                    scannedhosts = scannedhosts + int(details['total'])
+                if status == "In Progress":
+                    try:
+                        etc = details['etc']
+                        inprogress[etc] = scan
+                    except:
+                        etc = datetime.datetime.fromtimestamp(99999999999+random.randint(0,9999))
+                        inprogress[etc] = scan
+                        #status = "Running"
+                if status == "Running":
+                    running.append(scan)
+            output.append(str(len(completed))+" completed scans have found "+str(livehosts)+"/"+str(scannedhosts)+" live hosts.")
+            if inprogress:
+                now = datetime.datetime.now()
+                etclist = list(inprogress.keys())
+                etclist.sort()
+                previndex = 0
+                for i,etc in enumerate(etclist):
+                    topindex = i
+                    timeremaining = etc - now
+                    if timeremaining.total_seconds() < 0:
+                        timeremaining = "Now"
+                    elif timeremaining.total_seconds() > datetime.timedelta(days=365).total_seconds():
+                        timeremaining = " No etc"
+                    output.append(str(timeremaining).split(".")[0]+": "+inprogress[etc]+" ("+nmap_status[inprogress[etc]]['details']['task']+")")
 
-                elif "taskprogress" in lastline:
-                    tree = ET.ElementTree(lastline)
-                    root = ET.fromstring(lastline)
-                    status = "In Progress"
-                    details = {}
-                    for name,value in root.attrib.items():
-                        if name in ["time","etc"]:
-                            value = datetime.datetime.fromtimestamp(int(value))
-                        details[name] = value
-                        
-
-                else:
-                    status = "Running"
-                nmap_status[xmlfile] = {'status':status,'details':details}
-        completed = []
-        livehosts = 0
-        scannedhosts = 0
-        inprogress = {}
-        running = []
-        for scan,values in nmap_status.items():
-            status = values['status']
-            details = values['details']
-            if status == "Completed":
-                completed.append(scan)
-                livehosts = livehosts + int(details['up'])
-                scannedhosts = scannedhosts + int(details['total'])
-            if status == "In Progress":
-                try:
-                    etc = details['etc']
-                    inprogress[etc] = scan
-                except:
-                    status = "Running"
-            if status == "Running":
-                running.append(scan)
-        if completed:
-            #print("The following "+str(len(completed))+" completed scans have found "+str(livehosts)+"/"+str(scannedhosts)+" live hosts.\n\n"+", ".join(completed)+"\n")
-            print(str(len(completed))+" completed scans have found "+str(livehosts)+"/"+str(scannedhosts)+" live hosts.\n\n")
-        if inprogress:
-            times = [60,300,600,3600,7200,21600]
-            now = datetime.datetime.now()
-            etclist = list(inprogress.keys())
-            etclist.sort()
-            previndex = 0
-            print("The following scans are in progress:\n")
-            for i,etc in enumerate(etclist):
-                topindex = i
-                timeremaining = etc - now
-                if timeremaining.total_seconds() < 0:
-                    timeremaining = "Now"
-                print(str(timeremaining).split(".")[0]+": "+inprogress[etc]+" ("+nmap_status[inprogress[etc]]['details']['task']+")")
-
-        if running:
-            print("The following scans are running without progress available at this time:\n"+"\n".join(running))
+            if running:
+                for r in running:
+                    output.append(r)
+            if round != 0:
+                if len(running) == 0 and len(inprogress) == 0:
+                    return
+                #for _ in range(len(running) + len(inprogress) + 1):
+                for _ in range(outputlen):
+                    sys.stdout.write("\x1b[1A\x1b[2K") # move up cursor and delete whole line
+            print("\n".join(output))
+            outputlen = len(output)
+            round += 1
+            time.sleep(2)
 
 
 
@@ -368,7 +432,7 @@ def xmlimport(xmlfile):
                 osmatch.append((name,accuracy))
         except:
             pass
-        cur.execute("UPDATE scope set status = 'scanned' where ip = ?",(ip,))
+        cur.execute("UPDATE scope set nmapprocessed = 1 where ip = ?",(ip,))
     
         # Identifies batches of closed ports    
         for extraport in host.findall("./ports/extraports"):
@@ -432,8 +496,14 @@ def xmlimport(xmlfile):
                     cur.execute("INSERT INTO "+dbtable+" (ip,port,protocol) values (?,?,?)",(ip,port,protocol)) 
                 except:
                     pass
+            if state in ["open","closed"]:
+                try:
+                    cur.execute("UPDATE scope set live = 1 where ip = ?",(ip,))
+                except Exception as e:
+                    print(e)
         
     con.commit()
+    con.close()
 
 # Gets hostnames from an IP
 def gethostnames(ip):
@@ -680,9 +750,12 @@ if __name__ == "__main__":
     try:
         args.dest
     except:
-        print("Please select a subcommand")
+        parser.print_help(sys.stderr)
+        print("\n Please select a subcommand")
         exit(1)
     if args.dest == "parse":
+        if args.no-discovery:
+            print("nodisco")
         db = os.path.join(args.output, dbfile)
         global servicearray
         servicearray = {}
@@ -697,7 +770,10 @@ if __name__ == "__main__":
         scope_generator(args.input)
     elif args.dest == "scan":
         db = os.path.join(args.output, dbfile)
-        arpscantargets = findlocalranges()
-        arpscan(arpscantargets)
-        discoveryscan()
-        top20scan()
+        if args.no_discovery is True:
+            fullnmapscan("all")
+        else:
+            arpscantargets = findlocalranges()
+            arpscan(arpscantargets)
+            discoveryscan()
+            top20scan()
