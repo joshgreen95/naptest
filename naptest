@@ -110,10 +110,13 @@ def scope_generator(file):
     print("[+] "+str(scoped_ips)+" in scope IPs. "+str(excluded_ips)+" exclusions are present.")
 
     con.commit()
-    con.close()
     if args.print:
-        for ip in scope_ips:
+        cur.execute("select ip from scope where excluded=0")
+        ips = []
+        ips += [x[0] for x in cur.fetchall()]
+        for ip in ips:
             print(ip)
+    con.close()
 
 def findlocalranges():
     import ipaddress
@@ -281,7 +284,7 @@ def fullnmapscan(targets):
     for ip in ips:
         tcpfile = os.path.join(nmapdir,"nmap.tcp."+ip)
         udpfile = os.path.join(nmapdir,"nmap.udp."+ip)
-        tcpcommands.append(("nmap --disable-arp-ping -vvv -d -d  -Pn -p- -sS -sV -O -T4 -oA "+tcpfile+" --max-retries 3 "+ip+" &>/dev/null",ip,"fulltcpscan",tcpfile))
+        tcpcommands.append(("nmap -vvv -d -d  -Pn -p- -sS -sV -O -T4 -oA "+tcpfile+" --max-retries 3 "+ip+" &>/dev/null",ip,"fulltcpscan",tcpfile))
         udpcommands.append(("nmap -vvv -d -d  -Pn -p $(grep \"^Probe UDP\" -A 2 /usr/share/nmap/nmap-service-probes| grep -v \"rarity\|Probe\|--\"| cut -f2 -d \" \" | grep \"^[0-9]\"| tr \",\" \"\n\" | sort | uniq| tr \"\n\" \",\") -sU -T4 -oA "+udpfile+" "+ip+" &>/dev/null",ip,"fulludpscan",udpfile))
     commands = tcpcommands + udpcommands
     num = args.parallel
@@ -315,7 +318,8 @@ def nmap_xml_monitor(nmapdir):
                     f.close()
                     nmap_status[xmlfile] = {}
                     status = ""
-                    lastline = lastlines[-1:][0]
+                    if lastlines:
+                       lastline = lastlines[-1:][0]
                     if lastline == "</nmaprun>":
                         stats = "".join(lastlines[0:2])
                         root = ET.fromstring(stats)
@@ -754,8 +758,6 @@ if __name__ == "__main__":
         print("\n Please select a subcommand")
         exit(1)
     if args.dest == "parse":
-        if args.no-discovery:
-            print("nodisco")
         db = os.path.join(args.output, dbfile)
         global servicearray
         servicearray = {}
