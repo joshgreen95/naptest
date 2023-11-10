@@ -1,0 +1,10 @@
+#Dictionary, where key is the tool name, then a list in the following order: type of command (ip, multiple), output folder, command string (DIR=output folder, HOST=ip:port, IP=ip, PORT=port, protocol
+
+{
+"sipvicious-svmap": [ "ip", "svmap", "sipvicious-svmap -p PORT IP > DIR/HOST.out", "tcp"],
+"svmap": [ "ip", "svmap", "svmap -p PORT IP > DIR/HOST.out", "tcp"],
+"sipvicious-svwar": [ "ip", "svwar", "sipvicious-svwar -e 100-999 PROTO://HOST > DIR/HOST.out", "tcp"],
+"sipscan": [ "ip", "sipscan", "/usr/share/sippts/sipscan.py -p all -i IP > DIR/HOST.out", "tcp"],
+"sipenumerate": [ "ip", "sipenumerate", "/usr/share/sippts/sipenumerate.py -i IP -r PORT -p tcp > DIR/HOST.out", "tcp"],
+
+}

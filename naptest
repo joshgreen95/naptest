@@ -284,8 +284,8 @@ def fullnmapscan(targets):
     for ip in ips:
         tcpfile = os.path.join(nmapdir,"nmap.tcp."+ip)
         udpfile = os.path.join(nmapdir,"nmap.udp."+ip)
-        tcpcommands.append(("nmap -vvv -d -d  -Pn -p- -sS -sV -O -T4 -oA "+tcpfile+" --max-retries 3 "+ip+" &>/dev/null",ip,"fulltcpscan",tcpfile))
-        udpcommands.append(("nmap -vvv -d -d  -Pn -p $(grep \"^Probe UDP\" -A 2 /usr/share/nmap/nmap-service-probes| grep -v \"rarity\|Probe\|--\"| cut -f2 -d \" \" | grep \"^[0-9]\"| tr \",\" \"\n\" | sort | uniq| tr \"\n\" \",\") -sU -T4 -oA "+udpfile+" "+ip+" &>/dev/null",ip,"fulludpscan",udpfile))
+        tcpcommands.append(("nmap -vvv -d -d  -Pn -p- -sS -sV -O -T4 -oA "+tcpfile+" --max-retries 3 "+ip+" > /dev/null 2>&1",ip,"fulltcpscan",tcpfile))
+        udpcommands.append(("nmap -vvv -d -d  -Pn -p $(grep \"^Probe UDP\" -A 2 /usr/share/nmap/nmap-service-probes| grep -v \"rarity\|Probe\|--\"| cut -f2 -d \" \" | grep \"^[0-9]\"| tr \",\" \"\n\" | sort | uniq| tr \"\n\" \",\") -sU -T4 -oA "+udpfile+" "+ip+" > /dev/null 2>&1",ip,"fulludpscan",udpfile))
     commands = tcpcommands + udpcommands
     num = args.parallel
     tp = ThreadPool(num)
@@ -401,6 +401,25 @@ def nmap_xml_monitor(nmapdir):
             time.sleep(2)
 
 
+def closedports_to_ports_list(closedports):
+    clist = []
+    qlist = closedports.split(",")
+    for i in qlist:
+        iint = False
+        try:
+            int(i)
+            iint = True
+        except:
+            pass
+        if iint is True:
+            clist.append(i)
+        else:
+            start=int(i.split("-")[0])
+            end=int(i.split("-")[1])
+            for i in range(start,end+1):
+                clist.append(i)
+    return clist
+
 
 
 def xmlimport(xmlfile):
@@ -443,10 +462,17 @@ def xmlimport(xmlfile):
             if extraport.attrib['state'] == "closed":
                 closed_protocol=extraport.find("./extrareasons").attrib['proto']
                 closed_ports=extraport.find("./extrareasons").attrib['ports']
-                try:
-                    cur.execute("INSERT INTO closedports (ip,protocol,range) values (?,?,?)",(ip,closed_protocol,closed_ports)) 
-                except Exception as e:
-                    pass
+                closedport_list = closedports_to_ports_list(closed_ports)
+                for port in closedport_list:
+                    try:
+                        cur.execute("INSERT INTO closedports (ip,protocol,port) values (?,?,?)",(ip,closed_protocol,port)) 
+                    except Exception as e:
+                        pass
+                for crange in closed_ports.split(","):
+                    try:
+                        cur.execute("INSERT INTO closedports (ip,protocol,range) values (?,?,?)",(ip,closed_protocol,crange)) 
+                    except Exception as e:
+                        pass
         
         # Hostnames into database
         if hostname:
@@ -550,22 +576,30 @@ def findclosed():
     con=lite.connect(db)
     con.row_factory = lite.Row
     cur = con.cursor()
-    cur.execute('select * from closedports;')
+    cur.execute('select ip,protocol,range from closedports where port is null;')
+    closeddb = cur.fetchall()
+    if closeddb:
+        nowlist=[]
+        for row in closeddb:
+            cip = row['ip']
+            crange = row['range']
+            cprotocol = row['protocol'].upper()
+            string = cip+";"+cprotocol+";"+str(crange)+";"
+            nowlist.append(string)
+        servicearray['closed ranges']={"": nowlist}
+        print("   [*] Found "+str(len(nowlist))+" closed ranges")
+    cur.execute('select ip,protocol,port from closedports where range is null;')
     closeddb = cur.fetchall()
     if closeddb:
         nowlist=[]
         for row in closeddb:
             cip = row['ip']
             cport = row['port']
-            crange = row['range']
-            cprotocol = row['protocol']
-            if cport is None:
-                string = cip+":"+crange+":"+cprotocol
-            elif crange is None:
-                string = cip+":"+str(cport)+":"+cprotocol
+            cprotocol = row['protocol'].upper()
+            string = cip+";"+cprotocol+";"+str(cport)+";"
             nowlist.append(string)
-        servicearray['closed']={"": nowlist}
-        print("   [*] Found "+str(len(nowlist))+" closed ports/ranges")
+        servicearray['closed ports']={"": nowlist}
+        print("   [*] Found "+str(len(nowlist))+" closed ports")
 
 # Identifies HTTP and HTTPS and put them into the service array
 def findhttp(SSL):
@@ -631,8 +665,8 @@ def outputfiles():
     try:
         os.mkdir(servicedir)
     except OSError:
-        print("[!] Output folder already exists")
-        return
+        print("[!] Output folder already exists- overwriting")
+        pass
     for service in servicearray:
         for protocol,hostports in servicearray[service].items():
             if len(hostports) > 0:
@@ -696,6 +730,23 @@ def outputfiles():
     openfile = open (os.path.join(infodir,"live.ips"), 'w')
     for ip in ip_list:
         openfile.write(''.join(ip)+"\n")
+    openfile.close()
+
+    # Writes plaintext protocols
+    nonplaintextservices = ['ssh','isakmp','ms-wbt-server']
+    con=lite.connect(db)
+    con.row_factory = None
+    con.text_factory = str
+    cur = con.cursor()
+    ip_list = cur.execute('select ip,protocol,port,service from openports where tunnel=\'none\' and service != \'tcpwrapped\';').fetchall()
+    openfile = open (os.path.join(infodir,"plaintext.ports"), 'w')
+    for line in ip_list:
+        ip = line[0]
+        proto = line[1]
+        port = str(line[2])
+        service = str(line[3])
+        if service not in nonplaintextservices:
+            openfile.write(ip+";"+proto+";"+port+";:"+service+"\n")
     openfile.close()
 
     # Write OS matches and identified software versions to file
