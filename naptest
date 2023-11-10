@@ -463,16 +463,17 @@ def xmlimport(xmlfile):
                 closed_protocol=extraport.find("./extrareasons").attrib['proto']
                 closed_ports=extraport.find("./extrareasons").attrib['ports']
                 closedport_list = closedports_to_ports_list(closed_ports)
-                for port in closedport_list:
-                    try:
-                        cur.execute("INSERT INTO closedports (ip,protocol,port) values (?,?,?)",(ip,closed_protocol,port)) 
-                    except Exception as e:
-                        pass
-                for crange in closed_ports.split(","):
-                    try:
-                        cur.execute("INSERT INTO closedports (ip,protocol,range) values (?,?,?)",(ip,closed_protocol,crange)) 
-                    except Exception as e:
-                        pass
+                if closed_protocol != "udp":
+                    for port in closedport_list:
+                        try:
+                            cur.execute("INSERT INTO closedports (ip,protocol,port) values (?,?,?)",(ip,closed_protocol,port)) 
+                        except Exception as e:
+                            pass
+                    for crange in closed_ports.split(","):
+                        try:
+                            cur.execute("INSERT INTO closedports (ip,protocol,range) values (?,?,?)",(ip,closed_protocol,crange)) 
+                        except Exception as e:
+                            pass
         
         # Hostnames into database
         if hostname:
