@@ -2,6 +2,7 @@
 
 {
 
-"cameradar": [ "ip", "cameradar", "cameradar -c /usr/share/cameradar/dictionaries/credentials.json -r /usr/share/cameradar/dictionaries/routes -p PORT -t IP > DIR/HOST.out", "tcp"]
+"cameradar": [ "ip", "cameradar", "cameradar -c /usr/share/cameradar/dictionaries/credentials.json -r /usr/share/cameradar/dictionaries/routes -p PORT -t IP > DIR/HOST.out", "tcp"],
+"nmap-rtsp": [ "ip", "nmap-rtsp", "nmap -sV --script 'rtsp-*' -p PORT IP -oA DIR/HOST.nmap-rtsp.", "tcp"]
 
 }
