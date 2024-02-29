@@ -2,7 +2,7 @@
 
 {
 
-"nmbscan": [ "ip", "nmbscan", "nbtscan -a HOST | tee DIR/HOST.out", "tcp"]
+"nmbscan": [ "ip", "nmbscan", "nbtscan -a HOST | tee DIR/HOST.out", "tcp"],
 "smbclient list anonymous": [ "ip", "smbclient-list-anon", "smbclient -L IP -U% | tee DIR/IP.out", "tcp"]
 
 }

@@ -2,6 +2,6 @@
 
 {
 
-"onesxityone": [ "ip", "onesixtyone", "onesixtyone -c /repos/SecLists/Miscellaneous/snmp.txt IP -o DIR/IP.out", "udp"],
+"onesxityone": [ "ip", "onesixtyone", "onesixtyone -c /repos/SecLists/Discovery/SNMP/snmp.txt IP -o DIR/IP.out", "udp"],
 
 }
