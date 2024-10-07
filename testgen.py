@@ -9,6 +9,7 @@ modulepath=str(os.path.dirname(os.path.realpath(__file__)))+"/modules/"
 queuefile="CABO.sh"
 mkdirqueue=[]
 cmdqueue=[]
+invalid_commands = []
 
 def parsefile(infile):
     with open(infile) as f:
@@ -25,7 +26,6 @@ for service in servicearray:
             print(("[+] Found tests for "+service))
         except Exception as e:
             print("[!] Error processing "+service+" module: "+str(e))
-        invalid_commands = []
 
     for test in tests:
         testlist=tests[test]
@@ -52,7 +52,7 @@ for service in servicearray:
                 elif service == "securehttp":
                     proto="https"
                 else:
-                    proto=""
+                    proto="tcp"
                 hostip=host.split(":")[0]
                 hostport=host.split(":")[1]
                 
@@ -71,5 +71,6 @@ with open(queuefile, "w") as f:
         f.write(line+"\n")
     for line in cmdqueue:
         f.write(line+"\n")
-    print("[!] The following commands could not be found, and have not been added to the script:\n"+",".join(invalid_commands))
+    if invalid_commands:
+        print("[!] The following commands could not be found, and have not been added to the script:\n"+",".join(invalid_commands))
 
