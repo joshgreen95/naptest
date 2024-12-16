@@ -1,0 +1,7 @@
+#Dictionary, where key is the tool name, then a list in the following order: type of command (ip, multiple), output folder, command string (DIR=output folder, HOST=ip:port, IP=ip, PORT=port, protocol
+
+{
+
+"nmap ntp scripts": [ "ip", "ntp-nmap", "nmap -sU -sV --script \"ntp* and (discovery or vuln) and not (dos or brute)\" -p PORT IP -oA DIR/IP:PORT.ntp", "udp"],
+
+}
