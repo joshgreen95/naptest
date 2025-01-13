@@ -2,6 +2,8 @@
 
 {
 
+"dig-version": [ "ip", "dig", "dig @IP version.bind chaos TXT | tee DIR/HOST-version.out", "tcp"],
+"dig-internaldomain": [ "ip", "dig", "dig soa 0.in-addr.arpa @IP | tee DIR/HOST-internaldomain.out", "tcp"],
 "dig-version": [ "ip", "dig", "dig @IP version.bind chaos TXT | tee DIR/HOST-version.out", "udp"],
 "dig-internaldomain": [ "ip", "dig", "dig soa 0.in-addr.arpa @IP | tee DIR/HOST-internaldomain.out", "udp"],
 
