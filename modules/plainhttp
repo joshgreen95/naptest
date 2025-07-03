@@ -10,7 +10,7 @@
 "gobuster": [ "ip", "gobuster", "gobuster dir -u PROTO://HOST -w /repos/SecLists/Discovery/Web-Content/KitchensinkDirectories.fuzz.txt -o DIR/HOST.PROTO.out", "tcp"],
 "nikto": [ "ip", "nikto", "nikto -h PROTO://HOST -output $PWD/DIR/HOST.PROTO.txt", "tcp"],
 "retire-site-scanner": [ "ip", "retire-site-scanner", "retire-site-scanner -vv --sbom PROTO://HOST > $PWD/DIR/HOST.PROTO.json", "tcp"],
-"wappalyzer-next": [ "ip", "wappalyzer", " wappalyzer -i PROTO://HOST -oJ DIR/HOST.PROTO.json", "tcp"],
+"wappalyzer-next": [ "ip", "wappalyzer", "wappalyzer -i PROTO://HOST -oJ DIR/HOST.PROTO.json", "tcp"],
 "zap": [ "ip", "zap", "/usr/share/zaproxy/zap.sh -cmd -quickurl PROTO://HOST -quickprogress -quickout $PWD/DIR/HOST.PROTO.json", "tcp"],
 
 
