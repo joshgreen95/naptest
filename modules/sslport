@@ -4,5 +4,5 @@
 
 #"ssl-cipher-suite-enum": [ "ip", "ssl-cipher-suite-enum", "perl /repos/testing-tool-repository/infrastructure-assessment/ssl-cipher-suite-enum/ssl-cipher-suite-enum.pl --outfile DIR/HOST.out HOST", "tcp"],
 "sslscan": [ "ip", "sslscan", "sslscan --xml=DIR/HOST.out HOST", "tcp"],
-"testssl": [ "ip", "testssl", "testssl -oJ DIR/HOST.json https://HOST", "tcp"]
+"testssl": [ "ip", "testssl", "testssl -oJ DIR/HOST.json --ip one https://HOST", "tcp"]
 }
