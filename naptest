@@ -821,6 +821,8 @@ def test():
 	servicearrayfile = os.path.join(args.directory,svcarrayfile)
 	modulepath=str(os.path.dirname(os.path.realpath(__file__)))+"/modules/"
 	queuefile="CABO.sh"
+	successlog="cmd.success.log"
+	faillog="cmd.fail.log"
 	mkdirqueue=[]
 	cmdqueue=[]
 	invalid_commands = []
@@ -866,6 +868,9 @@ def test():
 			if exe is not None and args.check is False:
 				print(("[*] Adding "+test+" to the queue"))
 				mkdirqueue.append("mkdir "+outputfolder)	
+				cmdcount = len(servicearray[service][testprotocol])
+				cmdqueue.append("echo \"[+] Running "+test+"- "+str(cmdcount)+" instances\"")	
+				icmd = 1
 				for host in servicearray[service][testprotocol]:
 					if service == "plainhttp":
 						proto="http"
@@ -876,13 +881,16 @@ def test():
 					hostip=host.split(":")[0]
 					hostport=host.split(":")[1]
 					
+					countstr = "  "+test+" ("+str(icmd)+"/"+str(cmdcount)+")"
 					towriteout=str(testcommand)
 					towriteout=towriteout.replace("DIR", outputfolder)
 					towriteout=towriteout.replace("HOST", host)
 					towriteout=towriteout.replace("IP", hostip)
 					towriteout=towriteout.replace("PORT", hostport)
 					towriteout=towriteout.replace("PROTO", proto)
-					cmdqueue.append(towriteout)
+					cmdqueue.append("echo \'"+countstr+"\' ;"+towriteout+" && echo '"+towriteout+"' >> ./"+successlog+" || echo '"+towriteout+"' >> ./"+faillog)
+					icmd +=1
+				cmdqueue.append("echo \"[*] Completed "+test+"\"")	
 
 
 	with open(queuefile, "w") as f:
