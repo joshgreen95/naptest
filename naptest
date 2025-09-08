@@ -563,7 +563,7 @@ def findssl():
 		con=lite.connect(db)
 		con.row_factory = lite.Row
 		cur = con.cursor()
-		cur.execute('select ip,port from openports where tunnel="ssl" and protocol="tcp";')
+		cur.execute('select ip,port from openports where (tunnel="ssl" OR service like "%https%") and protocol="tcp";')
 		ssldb = cur.fetchall()
 		if ssldb:
 				nowlist=[]
@@ -610,6 +610,7 @@ def findclosed():
 
 # Identifies HTTP and HTTPS and put them into the service array
 def findhttp():
+		print("[+] HTTP and HTTPS identification")
 		con=lite.connect(db)
 		con.row_factory = lite.Row
 		cur = con.cursor()
@@ -881,9 +882,9 @@ def test():
 								cmdqueue.append("echo \"[+] Running "+test+"- "+str(cmdcount)+" instances\"")		
 								icmd = 1
 								for host in servicearray[service][testprotocol]:
-										if service == "plainhttp":
+										if service == "http":
 												proto="http"
-										elif service == "securehttp":
+										elif service == "https":
 												proto="https"
 										else:
 												proto="tcp"
