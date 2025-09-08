@@ -30,6 +30,7 @@ parser_status.add_argument("directory", help="directory containing nmap output")
 parser_status.set_defaults(dest="status")
 
 parser_test = subparsers.add_parser('test', help="test mode runs pre-defined tools against the identified services in scope.")
+parser_test.add_argument("--guesshttp", help="Attempt to work out if any unknown services are actually HTTP/S endpoints", default=False, action="store_true")
 parser_test.add_argument("-o", "--output", help="directory for output", default="./")
 parser_test.add_argument("-c", "--check", default=False, action='store_true', help="checks if all tools are available in $PATH")
 parser_test.add_argument("directory", help="directory containing the services.array")
@@ -650,18 +651,64 @@ def findservices():
 		servicelist = cur.fetchall()
 		for service,protocol in servicelist:
 				if "http" not in service:
-						cur.execute('SELECT ip ||":"|| port FROM openports WHERE service="'+service+'"and protocol="'+protocol+'";')
-						hostports=cur.fetchall()
-						nowlist=[]
-						if service not in servicearray:
-								servicearray[service]={}
-						for line in hostports:
-								nowlist.extend(line)
-						servicearray[service][protocol]=nowlist
+								cur.execute('SELECT ip ||":"|| port FROM openports WHERE service="'+service+'"and protocol="'+protocol+'";')
+								hostports=cur.fetchall()
+								nowlist=[]
+								if service not in servicearray:
+												servicearray[service]={}
+								for line in hostports:
+												nowlist.extend(line)
+								servicearray[service][protocol]=nowlist
 		print("		[*] Found "+str(len(servicelist))+" distinct services")
 		findssl()
 		findhttp()
+		guesshttp()
 		findclosed()
+
+# Tries to work out if an unknown service is http or https
+def guesshttp():
+		import requests,urllib3
+		urllib3.disable_warnings(category=urllib3.exceptions.InsecureRequestWarning)
+		global servicearray
+		
+		# Get all Services from DB
+		print("[+] Identifying unknown services and trying to work out if they're actually HTTP or HTTPS")
+		guessedhttp = []
+		guessedhttps = []
+		con=lite.connect(db)
+		cur = con.cursor()
+		cur.execute('SELECT distinct service,protocol FROM openports;')
+		servicelist = cur.fetchall()
+		for service,protocol in servicelist:
+				if isknownservice(service) is False and protocol == "tcp" and "http" not in service:
+						responses = []
+						nowlist = []
+						print("			"+service+"?")
+						cur.execute('SELECT ip ||":"|| port FROM openports WHERE service="'+service+'"and protocol="'+protocol+'";')
+						hostports=cur.fetchall()
+						for line in hostports:
+								nowlist.extend(line)
+								address = line[0]
+								try:
+										x = requests.get('http://'+address)
+										responses.append("http")
+								except:
+										x = requests.get('https://'+address, verify=False)
+										responses.append("https")
+				
+						if set(responses) == {'http'}:
+								print("			[!]"+service+ " is HTTP")
+								guessedhttp.extend(nowlist)
+						elif set(responses) == {"https"}:
+								print("			[!]"+service+ " is HTTPS")
+								guessedhttps.extend(nowlist)
+		if len(guessedhttp) > 0:
+				servicearray['guessedhttp']={}
+				servicearray['guessedhttp']['tcp']=guessedhttp
+		if len(guessedhttps) > 0:
+				servicearray['guessedhttps']={}
+				servicearray['guessedhttps']['tcp']=guessedhttps
+				servicearray['sslport']['tcp'].extend(guessedhttps)
 
 # Writes the services out as an array to file
 def outputarray():
@@ -824,6 +871,17 @@ def test_parsefile(infile):
 				return response
 
 
+
+def isknownservice(service):
+		modulepath=str(os.path.dirname(os.path.realpath(__file__)))+"/modules/"
+		if os.path.exists(modulepath+service):	
+				return True
+		else:
+				return False
+
+
+
+
 def test():
 		import sys,os,argparse,ast
 		from shutil import which
@@ -846,6 +904,7 @@ def test():
 
 		for service in servicearray:
 				tests=""
+				guessedhttp=False
 				if os.path.exists(modulepath+service):	
 						try:
 								tests=test_parsefile(modulepath+service)
