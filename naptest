@@ -2,6 +2,10 @@
 #naptest- not another pentest!
 
 import sys,sqlite3 as lite,os,argparse,ast
+import json
+#import template renderer
+from utils.renderer import load_paths_json, render_cmd, LEGACY_KEYS
+
 
 parser = argparse.ArgumentParser(prog='naptest')
 subparsers = parser.add_subparsers(help='sub-command help')
@@ -38,8 +42,6 @@ parser_test.set_defaults(dest="test")
 
 global args
 args = parser.parse_args()
-
-
 
 #Magic Variables
 dbfile="naptest.db"
@@ -292,7 +294,8 @@ def fullnmapscan(targets):
                 tcpfile = os.path.join(nmapdir,"nmap.tcp."+ip)
                 udpfile = os.path.join(nmapdir,"nmap.udp."+ip)
                 tcpcommands.append(("nmap -vvv -d -d    -Pn -p- -sS -sV -O -T4 -oA "+tcpfile+" --max-retries 3 "+ip+" > /dev/null 2>&1",ip,"fulltcpscan",tcpfile))
-                udpcommands.append(("nmap -vvv -d -d    -Pn -p $(grep \"^Probe UDP\" -A 2 /usr/share/nmap/nmap-service-probes| grep -v \"rarity\|Probe\|--\"| cut -f2 -d \" \" | grep \"^[0-9]\"| tr \",\" \"\n\" | sort | uniq| tr \"\n\" \",\") -sU -T4 -oA "+udpfile+" "+ip+" > /dev/null 2>&1",ip,"fulludpscan",udpfile))
+                #Fix character escaping, my terminal no like this? 
+                udpcommands.append(("nmap -vvv -d -d -Pn -p $(grep \"^Probe UDP\" -A 2 /usr/share/nmap/nmap-service-probes| grep -v \"rarity\\|Probe\\|--\"| cut -f2 -d \" \" | grep \"^[0-9]\"| tr \",\" \"\\n\" | sort | uniq| tr \"\\n\" \",\") -sU -T4 -oA " + udpfile + " " + ip + " > /dev/null 2>&1", ip, "fulludpscan", udpfile))
         commands = tcpcommands + udpcommands
         num = args.parallel
         tp = ThreadPool(num)
@@ -901,6 +904,8 @@ def test():
         interpreter_commands = []
         valid_commands = []
 
+        paths_dict = load_paths_json() #template rendering --josh
+
         with open(servicearrayfile) as f:
                 response = ast.literal_eval(f.read())
                 servicearray = response
@@ -923,18 +928,41 @@ def test():
                         testcommand=testlist[2]
                         testprotocol=testlist[3]
                         testexe = testcommand.split(" ")[0]
-                        exe = which(testexe)
+
+                        # try config overrides first
+                        candidate_exe = None
+                        if isinstance(paths_dict, dict):
+                            token = testlist[1].lower()
+                            candidate_exe = paths_dict.get(token) \
+                                            or paths_dict.get("paths", {}).get(token) \
+                                            or paths_dict.get("tools", {}).get(token)
+
+                        # fallback
+                        if not candidate_exe:
+                            try:
+                                builtins_min = {"DIR":".","HOST":"HOST","IP":"IP","PORT":"PORT","PROTO":"PROTO"}
+                                rendered = render_cmd(testcommand, builtins_min, paths_dict)
+                                candidate_exe = rendered.split()[0]
+                            except Exception:
+                                candidate_exe = testexe
+
+                        # check absolute path or search PATH
+                        exe = None
+                        if os.path.isabs(candidate_exe):
+                            if os.path.isfile(candidate_exe) and os.access(candidate_exe, os.X_OK):
+                                exe = candidate_exe
+                        else:
+                            exe = which(candidate_exe)
+
                         interpreters = ['perl','python']
-                        
+
                         if exe is None:
-                                invalid_commands.append(test)
-                        elif exe is not None and exe.split("/")[-1] in interpreters:
-                                interpreter_commands.append(test)
-                        elif exe is not None:
-                                valid_commands.append(test)
-                                
-
-
+                            invalid_commands.append(test)
+                        elif os.path.basename(exe) in interpreters:
+                            interpreter_commands.append(test)
+                        else:
+                            valid_commands.append(test)
+ 
                         #if exe is not None and exe.split("/")[-1] in interpreters:
                         #       print("[!] Interpreter detected for "+test+". Make sure the script exists.")
                         
@@ -955,12 +983,18 @@ def test():
                                         hostport=host.split(":")[1]
                                         
                                         countstr = "    "+test+" ("+str(icmd)+"/"+str(cmdcount)+")"
-                                        towriteout=str(testcommand)
-                                        towriteout=towriteout.replace("DIR", outputfolder)
-                                        towriteout=towriteout.replace("HOST", host)
-                                        towriteout=towriteout.replace("IP", hostip)
-                                        towriteout=towriteout.replace("PORT", hostport)
-                                        towriteout=towriteout.replace("PROTO", proto)
+
+                                        default_templates = {
+                                            "DIR":   outputfolder,
+                                            "HOST":  host,
+                                            "IP":    hostip,
+                                            "PORT":  hostport,
+                                            "PROTO": proto,
+                                        }
+
+                                        #iterate over dict
+                                        towriteout = render_cmd(testcommand, default_templates, paths_dict)
+
                                         cmdqueue.append("echo \'"+countstr+"\' ;"+towriteout+" && echo '"+towriteout+"' >> ./"+successlog+" || echo '"+towriteout+"' >> ./"+faillog)
                                         icmd +=1
                                 cmdqueue.append("echo \"[*] Completed "+test+"\"")  
